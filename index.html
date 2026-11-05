@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f3f4f2">
+<title>Drive or Ride</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f2; --surface:#ffffff; --ink:#1b1f1d; --muted:#5d6661; --line:#d9ddd9;
+  --bolt:#1f6fd1; --ev:#14946a; --gas:#c7701a; --metro:#b0237a;
+  --win:#0f7a56; --on-win:#ffffff; --track:#e6e9e6; --err:#b3261e;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#141716; --surface:#1d211f; --ink:#e9ece9; --muted:#9aa49e; --line:#2f3532;
+  --bolt:#5ea2ff; --ev:#3cc994; --gas:#f0a04b; --metro:#ec5fb4;
+  --win:#3cc994; --on-win:#0b1f17; --track:#2a2f2c; --err:#ff8a80; color-scheme:dark}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:calc(24px + env(safe-area-inset-top,0px));padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
+[hidden]{display:none!important}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px;border-bottom:3px solid var(--ink);padding-bottom:12px}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(40px,7vw,64px);line-height:.9;margin:0;text-transform:uppercase}
+h2{font-family:var(--f-display);font-weight:600;font-size:22px;text-transform:uppercase;letter-spacing:.04em;margin:0}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+button{font:600 14px var(--f-body);cursor:pointer;border-radius:4px}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--metro);outline-offset:2px}
+.btn{border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 14px}
+.btn-primary{border:0;background:var(--ink);color:var(--bg);padding:12px 22px;font-size:16px}
+.btn-primary:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=number],input[type=datetime-local],input[type=password]{font:500 15px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+input[type=number]{font-family:var(--f-mono);width:92px;padding:6px 8px}
+
+/* trip form */
+.trip{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 10px;align-items:end}
+.addr{position:relative;display:flex;flex-direction:column;gap:6px}
+.addr input{font-size:16px;padding:12px 14px}
+.swap{grid-row:1 / span 2;grid-column:2;align-self:center;width:44px;height:44px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:18px}
+.sugg{position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:4px;margin:4px 0 0;padding:4px 0;list-style:none;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:300px;overflow:auto}
+.sugg li{padding:8px 12px;cursor:pointer;display:flex;flex-direction:column;line-height:1.3}
+.sugg li[aria-selected=true],.sugg li:hover{background:var(--track)}
+.sugg li span{font-size:12px;color:var(--muted)}
+.sugg li.group{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);cursor:default;padding:6px 12px 2px}
+.sugg li.group:hover{background:none}
+.opts{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:end}
+.opt{display:flex;flex-direction:column;gap:6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;color:var(--muted);padding:8px 12px;font-size:13px}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.go-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.err{color:var(--err);font-size:14px;margin:0}
+
+/* results */
+.rows{display:flex;flex-direction:column;gap:2px}
+.row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) 84px 88px;gap:14px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row.colhead{padding:0 0 4px}
+.row.colhead div{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.row.colhead div:nth-child(3),.row.colhead div:nth-child(4){text-align:right}
+@media (max-width:560px){
+  .row{grid-template-columns:minmax(0,1fr) 68px 76px}
+  .row .bar{grid-column:1/-1;grid-row:2}
+  .row.colhead div:nth-child(2){display:none}
+}
+.who{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.who b{font-weight:600}
+.who span{font-size:12px;color:var(--muted)}
+.who .tag{color:var(--on-win);font-size:10px}
+.bar{height:22px;background:var(--track);border-radius:3px;position:relative;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:3px;transition:width .3s ease}
+.cost,.dur{text-align:right;font:500 18px var(--f-mono);font-variant-numeric:tabular-nums}
+.dur{font-size:16px;color:var(--muted);white-space:nowrap}
+.tag{display:inline-block;font:600 10px var(--f-body);letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:3px;background:var(--win);color:var(--on-win);margin-left:6px;vertical-align:2px}
+.verdict{display:flex;flex-direction:column;gap:6px;max-width:70ch}
+.verdict p{margin:0}
+.verdict .lead{font-size:18px}
+.legs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px}
+.leg{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:3px;border:1px solid var(--line)}
+.leg.line{border:0;font-weight:600}
+.arrow{color:var(--muted)}
+.links{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:14px}
+.links a{color:var(--ink)}
+.empty{color:var(--muted);text-align:center;padding:28px 12px}
+
+/* settings */
+details{background:var(--surface);border:1px solid var(--line);border-radius:6px}
+summary{padding:16px 20px;cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:20px;text-transform:uppercase;letter-spacing:.04em}
+.settings{padding:0 20px 20px;display:flex;flex-direction:column;gap:16px}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+td.src{font-size:12px;color:var(--muted)}
+.keybox{display:flex;gap:8px;flex-wrap:wrap}
+.keybox input{flex:1 1 260px}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.check input{margin-top:3px;accent-color:var(--ink)}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Drive or Ride</h1>
+    <p class="hint" style="max-width:44ch">Cost and travel time for the Bolt, the RAV4 Prime on battery or gas, and LA Metro.</p>
+  </header>
+
+  <section class="panel" aria-label="Trip">
+    <form id="tripForm" class="trip" autocomplete="off">
+      <div class="addr">
+        <label class="label" for="from">From</label>
+        <input type="text" id="from" placeholder="Start address or place" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList">
+        <ul class="sugg" id="fromList" role="listbox" hidden></ul>
+      </div>
+      <button type="button" class="swap" id="swap" aria-label="Swap start and destination" title="Swap">⇅</button>
+      <div class="addr">
+        <label class="label" for="to">To</label>
+        <input type="text" id="to" placeholder="Destination" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList">
+        <ul class="sugg" id="toList" role="listbox" hidden></ul>
+      </div>
+    </form>
+    <div class="opts">
+      <div class="opt">
+        <span class="label">Trip</span>
+        <div class="seg" role="group" aria-label="Trip type">
+          <button type="button" id="rt" aria-pressed="true">Round trip</button>
+          <button type="button" id="ow" aria-pressed="false">One way</button>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="label">Leave</span>
+        <div class="seg" role="group" aria-label="Departure">
+          <button type="button" id="leaveNow" aria-pressed="true">Now</button>
+          <button type="button" id="leaveLater" aria-pressed="false">Later</button>
+        </div>
+      </div>
+      <div class="opt" id="whenWrap" hidden>
+        <label class="label" for="when">Departure time</label>
+        <input type="datetime-local" id="when">
+      </div>
+      <div class="opt">
+        <label class="label" for="parking">Parking ($)</label>
+        <input type="number" id="parking" min="0" step="1" value="0">
+      </div>
+      <div class="opt">
+        <label class="label" for="parkMin">Park + walk (min)</label>
+        <input type="number" id="parkMin" min="0" step="1" value="5">
+      </div>
+    </div>
+    <div class="go-row">
+      <button type="button" class="btn-primary" id="go">Compare</button>
+      <p class="err" id="err" role="alert" hidden></p>
+    </div>
+  </section>
+
+  <section class="panel" id="results" aria-live="polite">
+    <div class="head">
+      <h2>This trip</h2>
+      <span class="label" id="tripMeta"></span>
+    </div>
+    <div id="out"><p class="empty">Enter a start and destination, then press Compare.</p></div>
+  </section>
+
+  <details id="settingsBox">
+    <summary>Settings</summary>
+    <div class="settings">
+      <div class="opt">
+        <label class="label" for="apiKey">Google Maps API key</label>
+        <div class="keybox">
+          <input type="password" id="apiKey" placeholder="AIza..." spellcheck="false">
+          <button type="button" class="btn" id="saveKey">Save key</button>
+        </div>
+        <p class="hint">Stored only in this browser. Needs Routes API and Places API (New) enabled.</p>
+      </div>
+      <div class="opt">
+        <label class="label" for="home">Home address</label>
+        <div class="keybox">
+          <input type="text" id="home" placeholder="Shows as the first suggestion">
+          <button type="button" class="btn" id="saveHome">Save</button>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="wear"> <span>Count wear and tear on the cars (tires, brakes, service)</span></label>
+      <div class="tbl">
+      <table>
+        <thead><tr><th>Input</th><th>Value</th><th>Basis</th></tr></thead>
+        <tbody>
+          <tr><td>Gas, regular</td><td><input type="number" id="gas" step="0.01" value="5.98"> $/gal</td><td class="src">LA County AAA average, Nov 1 2026</td></tr>
+          <tr><td>Home electricity</td><td><input type="number" id="kwh" step="0.01" value="0.25"> $/kWh</td><td class="src">LADWP residential, about 23–28¢</td></tr>
+          <tr><td>Bolt EUV efficiency</td><td><input type="number" id="boltEff" step="0.1" value="3.4"> mi/kWh</td><td class="src">EPA 29 kWh/100 mi</td></tr>
+          <tr><td>RAV4 Prime, battery</td><td><input type="number" id="evEff" step="0.1" value="2.8"> mi/kWh</td><td class="src">EPA 94 MPGe</td></tr>
+          <tr><td>RAV4 Prime, battery range</td><td><input type="number" id="evRange" step="1" value="42"> mi</td><td class="src">Miles past this run on gas</td></tr>
+          <tr><td>RAV4 Prime, gas</td><td><input type="number" id="mpg" step="1" value="38"> mpg</td><td class="src">EPA combined</td></tr>
+          <tr><td>Metro fare</td><td><input type="number" id="fare" step="0.05" value="1.75"> $/ride</td><td class="src">Used when Google has no fare. Transfers within 2 hrs free.</td></tr>
+          <tr><td>Metro daily cap</td><td><input type="number" id="dayCap" step="0.5" value="5"> $</td><td class="src">TAP fare capping</td></tr>
+          <tr><td>Wear and tear</td><td><input type="number" id="wearRate" step="0.01" value="0.10"> $/mi</td><td class="src">Only if checked above</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <button type="button" class="btn" id="reset" style="align-self:flex-start">Reset prices</button>
+    </div>
+  </details>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const STORE="drive-or-ride-app";
+const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap","wearRate","parking","parkMin"];
+const DEFAULTS={};PRICE_KEYS.forEach(k=>DEFAULTS[k]=$(k).value);
+const LA={latitude:34.0,longitude:-118.42};
+
+let state={key:"",home:"",recent:[],round:true,later:false,wear:false};
+let last=null; // last route results
+const picked={from:null,to:null}; // {text, placeId}
+
+function load(){try{const s=JSON.parse(localStorage.getItem(STORE)||"{}");
+  Object.assign(state,s.state||{});PRICE_KEYS.forEach(k=>{if(s.prices&&s.prices[k]!=null)$(k).value=s.prices[k]});}catch(e){}
+  $("apiKey").value=state.key||"";$("home").value=state.home||"";$("wear").checked=!!state.wear;
+  if(!state.key)$("settingsBox").open=true;}
+function save(){try{const prices={};PRICE_KEYS.forEach(k=>prices[k]=$(k).value);localStorage.setItem(STORE,JSON.stringify({state,prices}))}catch(e){}}
+
+const v=k=>Math.max(0,parseFloat($(k).value)||0);
+const money=n=>"$"+n.toFixed(2);
+const mins=s=>{const m=Math.round(s/60);if(m<60)return m+" min";return Math.floor(m/60)+"h "+(m%60?String(m%60).padStart(2,"0")+"m":"")};
+const secs=d=>d?parseFloat(String(d).replace("s","")):0;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- Google APIs ---------- */
+async function gpost(url,body,mask){
+  if(!state.key)throw new Error("Add your Google Maps API key in Settings first.");
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-Goog-Api-Key":state.key,...(mask?{"X-Goog-FieldMask":mask}:{})},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const m=j.error&&j.error.message||("Request failed ("+r.status+")");throw new Error(m)}
+  return j;
+}
+let sessionToken=newToken();
+function newToken(){return (crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now())}
+async function autocomplete(input){
+  const j=await gpost("https://places.googleapis.com/v1/places:autocomplete",{input,sessionToken,
+    locationBias:{circle:{center:LA,radius:50000}},includedRegionCodes:["us"]});
+  return (j.suggestions||[]).filter(s=>s.placePrediction).map(s=>{const p=s.placePrediction;
+    return{placeId:p.placeId,text:p.text&&p.text.text||"",main:p.structuredFormat&&p.structuredFormat.mainText&&p.structuredFormat.mainText.text||p.text.text,
+      sec:p.structuredFormat&&p.structuredFormat.secondaryText&&p.structuredFormat.secondaryText.text||""}});
+}
+function wp(p){return p.placeId?{placeId:p.placeId}:{address:p.text}}
+function depTime(){
+  if(!state.later||!$("when").value)return null;
+  const d=new Date($("when").value);return isNaN(d)||d<new Date()?null:d.toISOString();
+}
+async function routeDrive(o,d){
+  const body={origin:wp(o),destination:wp(d),travelMode:"DRIVE",routingPreference:"TRAFFIC_AWARE",units:"IMPERIAL"};
+  const t=depTime();if(t)body.departureTime=t;
+  const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,"routes.distanceMeters,routes.duration,routes.staticDuration");
+  const r=j.routes&&j.routes[0];if(!r)throw new Error("Google couldn't find a driving route between those places.");
+  return{meters:r.distanceMeters||0,sec:secs(r.duration),staticSec:secs(r.staticDuration)};
+}
+async function routeTransit(o,d){
+  const body={origin:wp(o),destination:wp(d),travelMode:"TRANSIT",units:"IMPERIAL"};
+  const t=depTime();if(t)body.departureTime=t;
+  const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,
+    "routes.distanceMeters,routes.duration,routes.travelAdvisory.transitFare,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails");
+  const r=j.routes&&j.routes[0];if(!r)return null;
+  const steps=(r.legs||[]).flatMap(l=>l.steps||[]);
+  // merge consecutive walking steps
+  const legs=[];
+  steps.forEach(s=>{
+    if(s.travelMode==="TRANSIT"&&s.transitDetails){const td=s.transitDetails,ln=td.transitLine||{};
+      legs.push({type:"transit",name:ln.nameShort||ln.name||"Transit",long:ln.name||"",color:ln.color||"",text:ln.textColor||"",
+        agency:(ln.agencies&&ln.agencies[0]&&ln.agencies[0].name)||"",vehicle:ln.vehicle&&ln.vehicle.type||"",
+        from:td.stopDetails&&td.stopDetails.departureStop&&td.stopDetails.departureStop.name||"",
+        to:td.stopDetails&&td.stopDetails.arrivalStop&&td.stopDetails.arrivalStop.name||"",stops:td.stopCount||0,sec:secs(s.staticDuration)});}
+    else{const last=legs[legs.length-1];if(last&&last.type==="walk")last.sec+=secs(s.staticDuration);else legs.push({type:"walk",sec:secs(s.staticDuration)})}
+  });
+  let fare=null;const tf=r.travelAdvisory&&r.travelAdvisory.transitFare;
+  if(tf&&(tf.units!=null||tf.nanos!=null))fare=(parseFloat(tf.units||0))+(tf.nanos||0)/1e9;
+  return{meters:r.distanceMeters||0,sec:secs(r.duration),legs:legs.filter(l=>l.type!=="walk"||l.sec>=60),fare,boardings:legs.filter(l=>l.type==="transit").length};
+}
+
+/* ---------- cost model ---------- */
+function prices(){return{gas:v("gas"),kwh:v("kwh"),boltEff:v("boltEff")||1,evEff:v("evEff")||1,evRange:v("evRange"),mpg:v("mpg")||1,
+  fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin")}}
+function carCost(mode,mi,p){
+  let e;
+  if(mode==="bolt")e=mi/p.boltEff*p.kwh;
+  else if(mode==="gas")e=mi/p.mpg*p.gas;
+  else{const b=Math.min(mi,p.evRange);e=b/p.evEff*p.kwh+(mi-b)/p.mpg*p.gas}
+  return e+mi*p.wear+p.parking;
+}
+
+function render(){
+  if(!last){return}
+  const p=prices(),mult=state.round?2:1;
+  const mi=last.drive.meters/1609.344*mult;
+  const driveSec=(last.drive.sec+p.parkMin*60)*mult;
+  const cars=[
+    {k:"bolt",name:"Chevy Bolt EUV",sub:"home charging",c:"var(--bolt)"},
+    {k:"ev",name:"RAV4 Prime",sub:mi>p.evRange?`${p.evRange} mi battery, ${(mi-p.evRange).toFixed(1)} mi gas`:"battery",c:"var(--ev)"},
+    {k:"gas",name:"RAV4 Prime",sub:"gas only",c:"var(--gas)"},
+  ].map(c=>({...c,cost:carCost(c.k,mi,p),sec:driveSec}));
+  let metro=null;
+  if(last.transit){
+    const t=last.transit;let oneWay,src;
+    if(t.fare!=null){oneWay=t.fare;src="Google fare"}else{oneWay=t.boardings?p.fare:0;src="est. fare"}
+    const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
+    metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} each way · ${src}${cost<oneWay*mult?", daily cap":""}`,c:"var(--metro)",cost,sec:t.sec*mult};
+  }
+  const all=metro?[...cars,metro]:cars;
+  const maxC=Math.max(...all.map(a=>a.cost),.01),minC=Math.min(...all.map(a=>a.cost));
+  const fastest=Math.min(...all.map(a=>a.sec));
+
+  $("tripMeta").textContent=`${mi.toFixed(1)} mi driven · ${state.round?"round trip":"one way"}`;
+  let h=`<div class="rows"><div class="row colhead"><div>Mode</div><div>Cost</div><div></div><div>Time</div></div>`;
+  h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
+    <div class="bar"><i style="width:${a.cost/maxC*100}%;background:${a.c}"></i></div>
+    <div class="cost">${money(a.cost)}</div><div class="dur">${mins(a.sec)}</div></div>`).join("");
+  h+=`</div>`;
+
+  // verdict
+  h+=`<div class="verdict">`;
+  if(metro){
+    const bolt=cars[0],dc=bolt.cost-metro.cost,dt=metro.sec-bolt.sec;
+    if(dc>0.005)h+=`<p class="lead"><b>Transit saves ${money(dc)}</b> over the Bolt${dt>60?` and takes ${mins(dt)} longer`:dt<-60?` and is ${mins(-dt)} faster`:""}.</p>`;
+    else if(dc<-0.005)h+=`<p class="lead"><b>The Bolt is ${money(-dc)} cheaper</b>${dt>60?` and ${mins(dt)} faster`:""} than transit.</p>`;
+    else h+=`<p class="lead"><b>Same cost</b> in the Bolt or on transit.</p>`;
+    const gasDc=cars[2].cost-metro.cost;
+    h+=`<p class="hint">RAV4 on gas vs transit: ${gasDc>=0?"transit saves "+money(gasDc):"RAV4 is "+money(-gasDc)+" cheaper"}.`;
+    if(dt>60&&dc>0)h+=` Transit pays you about ${money(dc/(dt/3600))} an hour for the extra time compared with the Bolt.`;
+    h+=` Times include ${p.parkMin} min to park and walk for each drive.</p>`;
+    h+=`<div class="legs" aria-label="Transit route">${legHtml(last.transit.legs)}</div>`;
+  }else{
+    h+=`<p class="lead">Google found no transit route for this trip${state.later?" at that time":""}.</p>`;
+  }
+  const q=s=>encodeURIComponent(s);
+  const o=q(last.from.text),d=q(last.to.text);
+  h+=`<div class="links"><a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving" target="_blank" rel="noopener">Driving in Google Maps</a>
+     <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a></div>`;
+  if(state.round)h+=`<p class="hint">Round trip doubles the outbound route. The ride home can differ with traffic and schedules.</p>`;
+  h+=`</div>`;
+  $("out").innerHTML=h;
+}
+function legHtml(legs){
+  return legs.map(l=>{
+    if(l.type==="walk")return `<span class="leg">Walk ${Math.round(l.sec/60)} min</span>`;
+    const st=l.color?`background:${esc(l.color)};color:${esc(l.text||"#fff")}`:`background:var(--metro);color:var(--on-win)`;
+    return `<span class="leg line" style="${st}" title="${esc(l.agency+" · "+l.from+" → "+l.to)}">${esc(l.name)}</span><span class="hint">${Math.round(l.sec/60)} min${l.stops?" · "+l.stops+" stops":""}</span>`;
+  }).join('<span class="arrow">→</span>');
+}
+
+/* ---------- compare ---------- */
+async function compare(){
+  const err=$("err");err.hidden=true;
+  const from=picked.from||(($("from").value.trim())?{text:$("from").value.trim()}:null);
+  const to=picked.to||(($("to").value.trim())?{text:$("to").value.trim()}:null);
+  if(!from||!to){err.textContent="Enter both a start and a destination.";err.hidden=false;return}
+  const go=$("go");go.disabled=true;go.textContent="Comparing…";
+  try{
+    const [drive,transit]=await Promise.all([routeDrive(from,to),routeTransit(from,to).catch(()=>null)]);
+    last={from,to,drive,transit};
+    remember(from);remember(to);
+    sessionToken=newToken();
+    render();
+  }catch(e){err.textContent=e.message;err.hidden=false}
+  finally{go.disabled=false;go.textContent="Compare";save()}
+}
+function remember(p){if(!p.text||p.text===state.home)return;state.recent=[p,...(state.recent||[]).filter(r=>r.text!==p.text)].slice(0,6)}
+
+/* ---------- address inputs ---------- */
+function setupAddr(id){
+  const inp=$(id),list=$(id+"List");let items=[],active=-1,timer=null,seq=0;
+  function show(groups){
+    if(document.activeElement!==inp)groups=[];
+    items=[];let h="";
+    groups.forEach(g=>{if(!g.items.length)return;if(g.label)h+=`<li class="group" role="presentation">${g.label}</li>`;
+      g.items.forEach(it=>{const i=items.length;items.push(it);h+=`<li role="option" id="${id}-o${i}" data-i="${i}" aria-selected="false">${esc(it.main||it.text)}${it.sec?`<span>${esc(it.sec)}</span>`:""}</li>`})});
+    list.innerHTML=h;list.hidden=!items.length;inp.setAttribute("aria-expanded",String(!!items.length));active=-1;
+  }
+  function local(){const g=[];if(state.home)g.push({label:"Saved",items:[{text:state.home,main:"Home",sec:state.home}]});
+    if(state.recent&&state.recent.length)g.push({label:"Recent",items:state.recent.map(r=>({...r,main:r.main||r.text,sec:r.main?r.sec:""}))});return g}
+  function choose(i){const it=items[i];if(!it)return;picked[id]={text:it.text,placeId:it.placeId,main:it.main,sec:it.sec};inp.value=it.text;list.hidden=true;inp.setAttribute("aria-expanded","false")}
+  function highlight(n){[...list.querySelectorAll('[role=option]')].forEach((li,i)=>li.setAttribute("aria-selected",String(i===n)));active=n;
+    if(n>=0){inp.setAttribute("aria-activedescendant",id+"-o"+n);const el=$(id+"-o"+n);el&&el.scrollIntoView({block:"nearest"})}}
+  inp.addEventListener("focus",()=>{if(!inp.value.trim())show(local())});
+  inp.addEventListener("input",()=>{picked[id]=null;clearTimeout(timer);const q=inp.value.trim();
+    if(q.length<3){show(q?[]:local());return}
+    timer=setTimeout(async()=>{const my=++seq;try{const r=await autocomplete(q);if(my===seq)show([{items:r}])}catch(e){if(my===seq){show([]);$("err").textContent=e.message;$("err").hidden=false}}},250)});
+  inp.addEventListener("keydown",e=>{
+    if(list.hidden){if(e.key==="Enter"){e.preventDefault();compare()}return}
+    if(e.key==="ArrowDown"){e.preventDefault();highlight(Math.min(items.length-1,active+1))}
+    else if(e.key==="ArrowUp"){e.preventDefault();highlight(Math.max(0,active-1))}
+    else if(e.key==="Enter"){e.preventDefault();if(active>=0)choose(active);else if(items.length)choose(0)}
+    else if(e.key==="Escape"){list.hidden=true}
+  });
+  list.addEventListener("mousedown",e=>{const li=e.target.closest("[data-i]");if(li){e.preventDefault();choose(+li.dataset.i)}});
+  inp.addEventListener("blur",()=>setTimeout(()=>{list.hidden=true;inp.setAttribute("aria-expanded","false")},120));
+}
+setupAddr("from");setupAddr("to");
+
+/* ---------- controls ---------- */
+function seg(a,b,val){$(a).setAttribute("aria-pressed",String(val));$(b).setAttribute("aria-pressed",String(!val))}
+$("rt").onclick=()=>{state.round=true;seg("rt","ow",true);render();save()};
+$("ow").onclick=()=>{state.round=false;seg("rt","ow",false);render();save()};
+$("leaveNow").onclick=()=>{state.later=false;seg("leaveNow","leaveLater",true);$("whenWrap").hidden=true;save()};
+$("leaveLater").onclick=()=>{state.later=true;seg("leaveNow","leaveLater",false);$("whenWrap").hidden=false;
+  if(!$("when").value){const d=new Date(Date.now()+3600e3);d.setMinutes(0,0,0);$("when").value=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16)}save()};
+$("swap").onclick=()=>{const a=$("from").value;$("from").value=$("to").value;$("to").value=a;const p=picked.from;picked.from=picked.to;picked.to=p};
+$("go").onclick=compare;
+$("saveKey").onclick=()=>{state.key=$("apiKey").value.trim();save();$("saveKey").textContent="Saved";setTimeout(()=>$("saveKey").textContent="Save key",1500)};
+$("saveHome").onclick=()=>{state.home=$("home").value.trim();save();$("saveHome").textContent="Saved";setTimeout(()=>$("saveHome").textContent="Save",1500)};
+$("wear").onchange=()=>{state.wear=$("wear").checked;render();save()};
+PRICE_KEYS.forEach(k=>$(k).addEventListener("input",()=>{render();save()}));
+$("reset").onclick=()=>{PRICE_KEYS.forEach(k=>$(k).value=DEFAULTS[k]);render();save()};
+
+load();
+seg("rt","ow",state.round);seg("leaveNow","leaveLater",!state.later);$("whenWrap").hidden=!state.later;
+window.__dor={render,setLast:x=>{last=x;render()}}; // test hook
+})();
+</script>
+</body>
+</html>
