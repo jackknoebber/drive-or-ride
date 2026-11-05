@@ -11,7 +11,7 @@ There's no server and no build step. It's just `index.html`. Your API key goes i
 3. **APIs & Services → Library**: enable **Routes API** and **Places API (New)**.
 4. **APIs & Services → Credentials → Create credentials → API key.**
 5. Click the new key to edit it:
-   - **Application restrictions → Websites**: add your site address once it's live (for example `https://drive-or-ride.netlify.app/*`). While testing on your own computer, add `http://localhost/*` too.
+   - **Application restrictions → Websites**: add your site address once it's live (for example `https://drivetime.knoebber.com/*`). While testing on your own computer, add `http://localhost/*` too.
    - **API restrictions → Restrict key**: tick only Routes API and Places API (New).
 6. Optional hard ceiling: under **APIs & Services → Routes API → Quotas**, set "Compute routes requests per day" to something like 200, and do the same for Places autocomplete. Then a bad day can't run up a bill.
 
