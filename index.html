@@ -10,7 +10,7 @@
 <style>
 :root{
   --bg:#f3f4f2; --surface:#ffffff; --ink:#1b1f1d; --muted:#5d6661; --line:#d9ddd9;
-  --bolt:#1f6fd1; --ev:#14946a; --gas:#c7701a; --metro:#b0237a;
+  --bolt:#1f6fd1; --ev:#14946a; --gas:#c7701a; --metro:#b0237a; --bike:#5b5bd6;
   --win:#0f7a56; --on-win:#ffffff; --track:#e6e9e6; --err:#b3261e;
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -19,7 +19,7 @@
 }
 @media (prefers-color-scheme: dark){:root{
   --bg:#141716; --surface:#1d211f; --ink:#e9ece9; --muted:#9aa49e; --line:#2f3532;
-  --bolt:#5ea2ff; --ev:#3cc994; --gas:#f0a04b; --metro:#ec5fb4;
+  --bolt:#5ea2ff; --ev:#3cc994; --gas:#f0a04b; --metro:#ec5fb4; --bike:#9b9bff;
   --win:#3cc994; --on-win:#0b1f17; --track:#2a2f2c; --err:#ff8a80; color-scheme:dark}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -115,7 +115,7 @@ td.src{font-size:12px;color:var(--muted)}
 <div class="wrap">
   <header>
     <h1>Drive or Ride</h1>
-    <p class="hint" style="max-width:44ch">Cost and travel time for the Bolt, the RAV4 Prime on battery or gas, and LA Metro.</p>
+    <p class="hint" style="max-width:44ch">Cost and travel time for the Bolt, the RAV4 Prime on battery or gas, LA Metro, and your bike.</p>
   </header>
 
   <section class="panel" aria-label="Trip">
@@ -205,6 +205,7 @@ td.src{font-size:12px;color:var(--muted)}
           <tr><td>RAV4 Prime, gas</td><td><input type="number" id="mpg" step="1" value="38"> mpg</td><td class="src">EPA combined</td></tr>
           <tr><td>Metro fare</td><td><input type="number" id="fare" step="0.05" value="1.75"> $/ride</td><td class="src">Used when Google has no fare. Transfers within 2 hrs free.</td></tr>
           <tr><td>Metro daily cap</td><td><input type="number" id="dayCap" step="0.5" value="5"> $</td><td class="src">TAP fare capping</td></tr>
+          <tr><td>Bike time</td><td><input type="number" id="bikeAdj" step="5" value="100"> %</td><td class="src">Of Google's estimate. Under 100 if you ride faster than Google assumes.</td></tr>
           <tr><td>Wear and tear</td><td><input type="number" id="wearRate" step="0.01" value="0.10"> $/mi</td><td class="src">Only if checked above</td></tr>
         </tbody>
       </table>
@@ -219,7 +220,7 @@ td.src{font-size:12px;color:var(--muted)}
 "use strict";
 const $=id=>document.getElementById(id);
 const STORE="drive-or-ride-app";
-const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap","wearRate","parking","parkMin"];
+const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap","wearRate","parking","parkMin","bikeAdj"];
 const DEFAULTS={};PRICE_KEYS.forEach(k=>DEFAULTS[k]=$(k).value);
 const LA={latitude:34.0,longitude:-118.42};
 
@@ -268,6 +269,12 @@ async function routeDrive(o,d){
   const r=j.routes&&j.routes[0];if(!r)throw new Error("Google couldn't find a driving route between those places.");
   return{meters:r.distanceMeters||0,sec:secs(r.duration),staticSec:secs(r.staticDuration)};
 }
+async function routeBike(o,d){
+  const body={origin:wp(o),destination:wp(d),travelMode:"BICYCLE",units:"IMPERIAL"};
+  const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,"routes.distanceMeters,routes.duration");
+  const r=j.routes&&j.routes[0];if(!r)return null;
+  return{meters:r.distanceMeters||0,sec:secs(r.duration)};
+}
 async function routeTransit(o,d){
   const body={origin:wp(o),destination:wp(d),travelMode:"TRANSIT",units:"IMPERIAL"};
   const t=depTime();if(t)body.departureTime=t;
@@ -292,7 +299,7 @@ async function routeTransit(o,d){
 
 /* ---------- cost model ---------- */
 function prices(){return{gas:v("gas"),kwh:v("kwh"),boltEff:v("boltEff")||1,evEff:v("evEff")||1,evRange:v("evRange"),mpg:v("mpg")||1,
-  fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin")}}
+  fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin"),bikeAdj:v("bikeAdj")||100}}
 function carCost(mode,mi,p){
   let e;
   if(mode==="bolt")e=mi/p.boltEff*p.kwh;
@@ -318,15 +325,18 @@ function render(){
     const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
     metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} each way · ${src}${cost<oneWay*mult?", daily cap":""}`,c:"var(--metro)",cost,sec:t.sec*mult};
   }
-  const all=metro?[...cars,metro]:cars;
-  const maxC=Math.max(...all.map(a=>a.cost),.01),minC=Math.min(...all.map(a=>a.cost));
+  let bike=null;
+  if(last.bike){const bmi=last.bike.meters/1609.344*mult;
+    bike={name:"Bike",sub:`${bmi.toFixed(1)} mi${p.bikeAdj!==100?` · ${p.bikeAdj}% of Google's time`:""}`,c:"var(--bike)",cost:0,sec:last.bike.sec*mult*(p.bikeAdj||100)/100};}
+  const all=[...cars,...(metro?[metro]:[]),...(bike?[bike]:[])];
+  const maxC=Math.max(...all.map(a=>a.cost),.01),minC=Math.min(...all.filter(a=>a!==bike).map(a=>a.cost));
   const fastest=Math.min(...all.map(a=>a.sec));
 
   $("tripMeta").textContent=`${mi.toFixed(1)} mi driven · ${state.round?"round trip":"one way"}`;
   let h=`<div class="rows"><div class="row colhead"><div>Mode</div><div>Cost</div><div></div><div>Time</div></div>`;
-  h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
+  h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${a!==bike&&Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
     <div class="bar"><i style="width:${a.cost/maxC*100}%;background:${a.c}"></i></div>
-    <div class="cost">${money(a.cost)}</div><div class="dur">${mins(a.sec)}</div></div>`).join("");
+    <div class="cost">${a===bike?"Free":money(a.cost)}</div><div class="dur">${mins(a.sec)}</div></div>`).join("");
   h+=`</div>`;
 
   // verdict
@@ -344,10 +354,14 @@ function render(){
   }else{
     h+=`<p class="lead">Google found no transit route for this trip${state.later?" at that time":""}.</p>`;
   }
+  if(bike){const bd=bike.sec-cars[0].sec;
+    h+=`<p class="hint">Biking is free and ${bd>60?"takes "+mins(bd)+" longer than":bd<-60?"is "+mins(-bd)+" faster than":"about the same time as"} driving the Bolt, which would cost ${money(cars[0].cost)}.</p>`;
+  }
   const q=s=>encodeURIComponent(s);
   const o=q(last.from.text),d=q(last.to.text);
   h+=`<div class="links"><a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving" target="_blank" rel="noopener">Driving in Google Maps</a>
-     <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a></div>`;
+     <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a>
+     <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=bicycling" target="_blank" rel="noopener">Bike in Google Maps</a></div>`;
   if(state.round)h+=`<p class="hint">Round trip doubles the outbound route. The ride home can differ with traffic and schedules.</p>`;
   h+=`</div>`;
   $("out").innerHTML=h;
@@ -368,8 +382,8 @@ async function compare(){
   if(!from||!to){err.textContent="Enter both a start and a destination.";err.hidden=false;return}
   const go=$("go");go.disabled=true;go.textContent="Comparing…";
   try{
-    const [drive,transit]=await Promise.all([routeDrive(from,to),routeTransit(from,to).catch(()=>null)]);
-    last={from,to,drive,transit};
+    const [drive,transit,bike]=await Promise.all([routeDrive(from,to),routeTransit(from,to).catch(()=>null),routeBike(from,to).catch(()=>null)]);
+    last={from,to,drive,transit,bike};
     remember(from);remember(to);
     sessionToken=newToken();
     render();
