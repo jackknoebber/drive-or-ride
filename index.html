@@ -122,11 +122,13 @@ td.src{font-size:12px;color:var(--muted)}
 .tl{position:relative;display:flex;flex-direction:column;gap:4px;padding-top:26px}
 .ticks{position:absolute;inset:0;pointer-events:none}
 .tick{position:absolute;top:0;bottom:0;border-left:1px dashed var(--line)}
+.tick.target{border-left:2px solid var(--ink);opacity:.5}
 .tick em{position:absolute;top:0;left:4px;font:500 11px var(--f-mono);font-style:normal;color:var(--muted);white-space:nowrap}
 .tlr{position:relative;display:flex;flex-direction:column;gap:6px;padding:10px 8px;margin:0 -8px;border-radius:6px}
 .tlr.pick{cursor:pointer}
-.tlr.pick:hover{background:var(--track)}
-.tlr.sel,.tlr.sel:hover{background:color-mix(in srgb,var(--bike) 10%,transparent);box-shadow:inset 3px 0 0 var(--bike)}
+.tlr{--rowbg:var(--surface)}
+.tlr.pick:hover{--rowbg:var(--track);background:var(--rowbg)}
+.tlr.sel,.tlr.sel:hover{--rowbg:color-mix(in srgb,var(--bike) 10%,var(--surface));background:var(--rowbg);box-shadow:inset 3px 0 0 var(--bike)}
 .tlr:focus-visible{outline:2px solid var(--metro);outline-offset:0}
 .track{position:relative;height:30px}
 .sx{position:absolute;top:0;height:100%;display:flex;align-items:center;justify-content:center;font-style:normal;overflow:hidden;border-radius:7px}
@@ -139,6 +141,7 @@ td.src{font-size:12px;color:var(--muted)}
 .sx.loading{background:linear-gradient(90deg,var(--track),var(--line),var(--track));background-size:200% 100%;animation:shim 1.2s linear infinite;opacity:.7}
 @keyframes shim{to{background-position:-200% 0}}
 .clipfade{position:absolute;right:0;top:0;bottom:0;width:40px;background:linear-gradient(90deg,transparent,var(--surface));pointer-events:none}
+.clipfade.left{left:0;right:auto;background:linear-gradient(270deg,transparent,var(--surface))}
 .tlr.sel .clipfade,.tlr.pick:hover .clipfade{display:none}
 .tlmeta{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"nm when dur";align-items:baseline;gap:2px 12px}
 .tlmeta .nm{grid-area:nm}.tlmeta .when{grid-area:when}.tlmeta .dur{grid-area:dur}
@@ -147,6 +150,7 @@ td.src{font-size:12px;color:var(--muted)}
 .tlmeta .nm{font-weight:600}
 .tlmeta .nm em{font-style:normal;font-weight:500;color:var(--muted);font-size:13px}
 .tlmeta .when{font-size:13px;color:var(--muted)}
+.tlmeta .when,.tlmeta .dur{position:relative;z-index:1;background:var(--rowbg);padding-left:6px}
 .tlmeta .dur{font:600 16px var(--f-mono);min-width:64px;text-align:right}
 .card{border:1px solid var(--line);border-radius:6px;padding:16px;border-top-width:1px}
 .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
@@ -196,14 +200,15 @@ td.src{font-size:12px;color:var(--muted)}
         </div>
       </div>
       <div class="opt">
-        <span class="label">Leave</span>
-        <div class="seg" role="group" aria-label="Departure">
-          <button type="button" id="leaveNow" aria-pressed="true">Now</button>
-          <button type="button" id="leaveLater" aria-pressed="false">Later</button>
+        <span class="label">When</span>
+        <div class="seg" role="group" aria-label="When">
+          <button type="button" id="leaveNow" aria-pressed="true">Leave now</button>
+          <button type="button" id="leaveLater" aria-pressed="false">Leave at</button>
+          <button type="button" id="arriveBy" aria-pressed="false">Arrive by</button>
         </div>
       </div>
       <div class="opt" id="whenWrap" hidden>
-        <label class="label" for="when">Departure time</label>
+        <label class="label" for="when" id="whenLabel">Departure time</label>
         <input type="datetime-local" id="when" step="300">
       </div>
       <div class="opt">
@@ -329,13 +334,19 @@ const MI=1609.344;
 function dist(a,b){const R=6371e3,r=x=>x*Math.PI/180,dLa=r(b.latitude-a.latitude),dLo=r(b.longitude-a.longitude);
   const h=Math.sin(dLa/2)**2+Math.cos(r(a.latitude))*Math.cos(r(b.latitude))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
 const llOf=x=>x&&x.latLng&&x.latLng.latitude!=null?{latitude:x.latLng.latitude,longitude:x.latLng.longitude}:null;
-function depTime(){
-  if(!state.later||!$("when").value)return null;
-  const d=new Date($("when").value);return isNaN(d)||d<new Date()?null:d.toISOString();
+const tMode=()=>state.timeMode||(state.later?"leave":"now");
+function pickedTime(){
+  if(tMode()==="now"||!$("when").value)return null;
+  const d=new Date($("when").value);return isNaN(d)||d<new Date()?null:d.getTime();
 }
+const iso=ms=>new Date(ms).toISOString();
+function depTime(){const t=pickedTime();return tMode()==="leave"&&t?iso(t):null}
+function arrTime(){const t=pickedTime();return tMode()==="arrive"&&t?iso(t):null}
 async function routeDrive(o,d){
   const body={origin:wp(o),destination:wp(d),travelMode:"DRIVE",routingPreference:"TRAFFIC_AWARE",units:"IMPERIAL"};
   const t=depTime();if(t)body.departureTime=t;
+  // Google can't route a drive by arrival time; ask for traffic about an hour before instead
+  const a=arrTime();if(a){const g=Date.parse(a)-3600e3;if(g>Date.now()+60e3)body.departureTime=iso(g)}
   const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,"routes.distanceMeters,routes.duration,routes.staticDuration,routes.legs.startLocation,routes.legs.endLocation");
   const r=j.routes&&j.routes[0];if(!r)throw new Error("Google couldn't find a driving route between those places.");
   const lg=r.legs||[];
@@ -348,9 +359,12 @@ async function routeBike(o,d){
   const r=j.routes&&j.routes[0];if(!r)return null;
   return{meters:r.distanceMeters||0,sec:secs(r.duration)};
 }
-async function routeTransit(o,d,when,forBike){
+async function routeTransit(o,d,when,forBike,arriveAt){
   const body={origin:wp(o),destination:wp(d),travelMode:"TRANSIT",units:"IMPERIAL"};
-  const t=when||depTime();if(t)body.departureTime=t;
+  if(arriveAt)body.arrivalTime=arriveAt;
+  else if(when)body.departureTime=when;
+  else if(arrTime())body.arrivalTime=arrTime();
+  else if(depTime())body.departureTime=depTime();
   if(forBike)transitPrefs(body);
   const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,
     "routes.distanceMeters,routes.duration,routes.travelAdvisory.transitFare,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails");
@@ -419,10 +433,10 @@ async function candidateStations(end,other,favs){
   favs.forEach(add);groups.flat().forEach(add); // favorites first so they survive the cap
   return out.slice(0,p.stationCount);
 }
-async function matrix(origins,destinations,mode,dep){
+async function matrix(origins,destinations,mode,dep,arr){
   if(!origins.length||!destinations.length)return{};
   const body={origins:origins.map(o=>({waypoint:wp(o)})),destinations:destinations.map(d=>({waypoint:wp(d)})),travelMode:mode};
-  if(dep)body.departureTime=dep;
+  if(arr)body.arrivalTime=arr;else if(dep)body.departureTime=dep;
   if(mode==="TRANSIT")transitPrefs(body);
   const j=await gpost("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",body,"originIndex,destinationIndex,duration,distanceMeters,condition");
   const m={};
@@ -446,7 +460,13 @@ async function routeBikeTransit(A,B){
   const base=depTime()?new Date(depTime()).getTime():Date.now();
   const firstBikes=tO.filter(o=>o.bike).map(o=>o.bike.sec).sort((a,b)=>a-b);
   const typical=firstBikes.length?firstBikes[Math.floor(firstBikes.length/2)]+buf:0;
-  const tm=await matrix(tO.map(o=>o.p),tD.map(d=>d.p),"TRANSIT",new Date(base+typical*1000+60e3).toISOString());
+  const arrMs=arrTime()?Date.parse(arrTime()):null;
+  let tm;
+  if(arrMs){ // arrive by: trains must get in early enough to bike the last stretch
+    const lastBikes=tD.filter(d=>d.bike).map(d=>d.bike.sec).sort((a,b)=>a-b);
+    const tail=lastBikes.length?lastBikes[Math.floor(lastBikes.length/2)]+buf:0;
+    tm=await matrix(tO.map(o=>o.p),tD.map(d=>d.p),"TRANSIT",null,iso(arrMs-tail*1000-60e3));
+  }else tm=await matrix(tO.map(o=>o.p),tD.map(d=>d.p),"TRANSIT",iso(base+typical*1000+60e3));
   const cands=[];
   tO.forEach((o,i)=>tD.forEach((d,j)=>{
     if(!o.bike&&!d.bike)return; // that's plain transit, already its own row
@@ -461,8 +481,8 @@ async function routeBikeTransit(A,B){
   const pick=new Map();
   MIXES.forEach(m=>[...cands].sort((a,b)=>score(a,m.w)-score(b,m.w)).slice(0,3).forEach(c=>pick.set(c.key,c)));
   const top=[...pick.values()];
-  const full=await Promise.all(top.map(c=>{const lead=c.o.bike?c.o.bike.sec+buf:0;
-    return routeTransit(c.o.p,c.d.p,new Date(base+lead*1000+60e3).toISOString(),true).catch(()=>null)}));
+  const full=await Promise.all(top.map(c=>{const lead=c.o.bike?c.o.bike.sec+buf:0,tail=c.d.bike?c.d.bike.sec+buf:0;
+    return (arrMs?routeTransit(c.o.p,c.d.p,null,true,iso(arrMs-tail*1000-60e3)):routeTransit(c.o.p,c.d.p,iso(base+lead*1000+60e3),true)).catch(()=>null)}));
   const opts=top.map((c,i)=>{const t=full[i];if(!t||!t.boardings)return null; // skip "transit" that is only walking
     const legs=[];
     if(c.o.bike)legs.push({type:"bike",sec:c.o.bike.sec,meters:c.o.bike.meters,to:c.o.p.name});
@@ -527,8 +547,10 @@ function schedule(legs,anchor,buf,useTimes){
       if(l.type==="bike"&&i<legs.length-1&&B){segs.push({kind:"wait",t0:t,t1:t+B,buf:true});t+=B}
     }
   });
-  return{start,end:t,segs};
+  return{start,end:t,segs,timed:fi>=0};
 }
+// arrive by: lay a schedule out so it ends at the target time (used when there are no train times to pin it)
+function endAt(sch,arrive){const d=arrive-sch.end;return{...sch,start:sch.start+d,end:arrive,segs:sch.segs.map(x=>({...x,t0:x.t0+d,t1:x.t1+d}))}}
 const clock=ms=>new Date(ms).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 const tickLabel=ms=>{const d=new Date(ms);return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})};
 function pillName(l){
@@ -547,15 +569,20 @@ function segHtml(s,a0,span){
   const l=s.leg,bg=l.color?esc(l.color):"var(--metro)",fg=l.color?esc(l.text||"#fff"):"var(--on-win)";
   return `<i class="sx solid" style="${pos};background:${bg};color:${fg}" title="${esc((l.long||l.name)+" · "+m+" min"+(l.from?" · "+l.from+" → "+l.to:""))}"><b>${esc(pillName(l))}</b></i>`;
 }
-function timelineHtml(rows,anchor){
+function timelineHtml(rows,anchor,arriveMode){
   const ready=rows.filter(r=>r.sch);
   if(!ready.length)return"";
-  const a0=Math.min(anchor,...ready.map(r=>r.sch.start));
+  let a0=Math.min(anchor,...ready.map(r=>r.sch.start));
+  if(arriveMode){ // a very early-leaving bike-only row shouldn't squash everything else either
+    const earliest=Math.min(...ready.map(r=>r.sch.start)),st=ready.filter(r=>!r.clipOk).map(r=>r.sch.start);
+    const core0=st.length?Math.min(...st):earliest;
+    a0=earliest<core0-(anchor-core0)*.35?core0-(anchor-core0)*.25:earliest;
+  }
   // a very long bike-only row shouldn't squash everything else
   const longest=Math.max(...ready.map(r=>r.sch.end));
-  const ends=ready.filter(r=>!r.clipOk).map(r=>r.sch.end);
+  const ends=ready.filter(r=>!r.clipOk).map(r=>r.sch.end).concat(arriveMode?[anchor]:[]);
   const core=ends.length?Math.max(...ends):longest;
-  const a1=longest>core+(core-a0)*.35?core+(core-a0)*.25:longest;
+  const a1=Math.max(longest>core+(core-a0)*.35?core+(core-a0)*.25:longest,arriveMode?anchor+(anchor-a0)*.04:0);
   const spanMin=(a1-a0)/60e3;
   const step=[10,15,30,60,120].find(s=>spanMin/s<=5)||180;
   const first=Math.ceil(a0/(step*60e3))*step*60e3;
@@ -563,18 +590,20 @@ function timelineHtml(rows,anchor){
   let ticks="";
   for(let t=first;t<=a1;t+=step*60e3){const x=(t-start)/span*100;if(x>84)break;
     ticks+=`<span class="tick" style="left:${x}%"><em>${tickLabel(t)}</em></span>`}
+  if(arriveMode)ticks+=`<span class="tick target" style="left:${(anchor-start)/span*100}%"></span>`;
   let h=`<div class="tl" role="list"><div class="ticks" aria-hidden="true">${ticks}</div>`;
   rows.forEach(r=>{
     const attrs=r.mix?` data-mix="${r.mix}" tabindex="0" role="button" aria-pressed="${!!r.sel}"`:` role="listitem"`;
     h+=`<div class="tlr${r.sel?" sel":""}${r.mix?" pick":""}"${attrs}><div class="track">`;
     if(r.sch){
-      const clipped=r.sch.end>a1;
-      h+=r.sch.segs.filter(s=>s.t0<a1).map(s=>segHtml({...s,t1:Math.min(s.t1,a1)},start,span)).join("");
+      const clipped=r.sch.end>a1,clipL=r.sch.start<start;
+      h+=r.sch.segs.filter(s=>s.t0<a1&&s.t1>start).map(s=>segHtml({...s,t0:Math.max(s.t0,start),t1:Math.min(s.t1,a1)},start,span)).join("");
       if(clipped)h+=`<i class="clipfade" aria-hidden="true"></i>`;
+      if(clipL)h+=`<i class="clipfade left" aria-hidden="true"></i>`;
     }else h+=`<i class="sx loading" style="left:0;width:100%"></i>`;
     const late=r.sch?Math.round((r.sch.start-anchor)/60e3):0;
     h+=`</div><div class="tlmeta"><span class="nm">${esc(r.name)}${r.tag?` <em>${esc(r.tag)}</em>`:""}</span>`;
-    h+=r.sch?`<span class="when">${late>=2?`Leave ${clock(r.sch.start)} · `:""}arrive ${clock(r.sch.end)}</span><span class="dur num">${mins((r.sch.end-r.sch.start)/1000)}</span>`:`<span class="when">${esc(r.note||"")}</span>`;
+    h+=r.sch?`<span class="when">${late>=2||arriveMode?`Leave ${clock(r.sch.start)} · `:""}arrive ${clock(r.sch.end)}</span><span class="dur num">${mins((r.sch.end-r.sch.start)/1000)}</span>`:`<span class="when">${esc(r.note||"")}</span>`;
     h+=`</div></div>`;
   });
   return h+`</div>`;
@@ -616,14 +645,16 @@ function render(){
     {k:"gas",name:"RAV4 Prime",sub:"gas only",c:"var(--gas)"},
   ].map(c=>({...c,cost:carCost(c.k,mi,p),sec:driveSec}));
   // timelines (one way)
-  const driveSch=schedule([{type:"drive",sec:last.drive.sec},{type:"park",sec:p.parkMin*60}],anchor,0);
-  const tSch=last.transit?schedule(last.transit.legs,anchor,0):null;
+  const arriveMode=last.mode==="arrive";
+  const place=(legs,b)=>{if(!arriveMode)return schedule(legs,anchor,b);const sc=schedule(legs,Date.now(),b);return sc.timed?sc:endAt(sc,anchor)};
+  const driveSch=place([{type:"drive",sec:last.drive.sec},{type:"park",sec:p.parkMin*60}],0);
+  const tSch=last.transit?place(last.transit.legs,0):null;
   const bt=last.bt,buf=bt&&bt.buf!=null?bt.buf:p.platformMin*60;
   const mixK=MIXES.some(m=>m.k===state.mix)?state.mix:"fast",mixL=MIXES.find(m=>m.k===mixK).label;
   const best=bt&&bt.mixes?bt.mixes[mixK]:null;
-  const bestSch=best?schedule(best.legs,anchor,buf):null;
+  const bestSch=best?place(best.legs,buf):null;
   const bikeSec=last.bike?last.bike.sec*(p.bikeAdj||100)/100:0;
-  const bikeSch=last.bike?schedule([{type:"bike",sec:bikeSec}],anchor,0):null;
+  const bikeSch=last.bike?place([{type:"bike",sec:bikeSec}],0):null;
   const dur=s=>(s.end-s.start)/1000;
 
   let metro=null;
@@ -655,7 +686,7 @@ function render(){
       :dc<-0.005?`<b>The Bolt is ${money(-dc)} cheaper</b>${dt>60?` and ${mins(dt)} faster each way`:""} than transit.`:`<b>Same cost</b> in the Bolt or on transit.`;
     if(dt>60&&dc>0)v+=` <span class="hint">That's about ${money(dc/(dt*mult/3600))} an hour for the extra time.</span>`;
     h+=`<p class="lead verdict-line">${v}</p>`;
-  }else h+=`<p class="lead verdict-line">Google found no transit route for this trip${state.later?" at that time":""}.</p>`;
+  }else h+=`<p class="lead verdict-line">Google found no transit route for this trip${tMode()!=="now"?" at that time":""}.</p>`;
 
   // timeline section
   const trows=[{name:"Drive",tag:"any car",sch:driveSch,clipOk:false}];
@@ -665,11 +696,11 @@ function render(){
     const seen=new Map();
     MIXES.forEach(m=>{const o=bt.mixes[m.k];if(!o)return;const e=seen.get(o.key);if(e){e.labels.push(m.label);if(m.k===mixK)e.sel=true;return}
       seen.set(o.key,{labels:[m.label],first:m.k,sel:m.k===mixK,o})});
-    [...seen.values()].forEach(v=>trows.push({name:"Bike + train",tag:v.labels.join(" · "),mix:v.sel?mixK:v.first,sel:v.sel,sch:v.sel?bestSch:schedule(v.o.legs,anchor,buf)}));
+    [...seen.values()].forEach(v=>trows.push({name:"Bike + train",tag:v.labels.join(" · "),mix:v.sel?mixK:v.first,sel:v.sel,sch:v.sel?bestSch:place(v.o.legs,buf)}));
   }
   if(bikeSch)trows.push({name:"Bike",sch:bikeSch,clipOk:true});
-  h+=`<section class="sect"><div class="head"><h3>Timeline</h3><span class="label">One way · leaving ${clock(anchor)}</span></div>`;
-  h+=timelineHtml(trows,anchor);
+  h+=`<section class="sect"><div class="head"><h3>Timeline</h3><span class="label">One way · ${arriveMode?"arrive by":"leaving"} ${clock(anchor)}</span></div>`;
+  h+=timelineHtml(trows,anchor,arriveMode);
   if(bt&&bt.mixes&&Object.keys(bt.mixes).length)h+=`<p class="hint">Tap a bike + train row to switch between less biking, fastest and more biking.</p>`;
   h+=`</section>`;
 
@@ -701,7 +732,7 @@ async function compare(){
   const go=$("go");go.disabled=true;go.textContent="Comparing…";
   try{
     const [drive,transit,bike]=await Promise.all([routeDrive(from,to),routeTransit(from,to).catch(()=>null),routeBike(from,to).catch(()=>null)]);
-    const run={from,to,drive,transit,bike,bt:null,base:depTime()?Date.parse(depTime()):Date.now()};last=run;
+    const run={from,to,drive,transit,bike,bt:null,mode:arrTime()?"arrive":"leave",base:arrTime()?Date.parse(arrTime()):depTime()?Date.parse(depTime()):Date.now()};last=run;
     remember(from);remember(to);
     sessionToken=newToken();
     if(drive.start&&drive.end){
@@ -751,12 +782,17 @@ setupAddr("from");setupAddr("to");
 function seg(a,b,val){$(a).setAttribute("aria-pressed",String(val));$(b).setAttribute("aria-pressed",String(!val))}
 $("rt").onclick=()=>{state.round=true;seg("rt","ow",true);render();save()};
 $("ow").onclick=()=>{state.round=false;seg("rt","ow",false);render();save()};
-$("leaveNow").onclick=()=>{state.later=false;seg("leaveNow","leaveLater",true);$("whenWrap").hidden=true;save()};
+function setMode(m){state.timeMode=m;delete state.later;
+  [["leaveNow","now"],["leaveLater","leave"],["arriveBy","arrive"]].forEach(([id,k])=>$(id).setAttribute("aria-pressed",String(k===m)));
+  $("whenWrap").hidden=m==="now";$("whenLabel").textContent=m==="arrive"?"Arrive by":"Departure time";
+  if(m!=="now"&&!$("when").value){const d=new Date(Date.now()+3600e3);d.setMinutes(0,0,0);$("when").value=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16)}
+  save()}
+$("leaveNow").onclick=()=>setMode("now");
+$("arriveBy").onclick=()=>setMode("arrive");
 // keep departure on 5-minute steps, even if a time is typed in
 $("when").addEventListener("change",()=>{const v=$("when").value;if(!v)return;const d=new Date(v);if(isNaN(d))return;
   const m=Math.round(d.getMinutes()/5)*5;d.setMinutes(m,0,0);const nv=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);if(nv!==v)$("when").value=nv});
-$("leaveLater").onclick=()=>{state.later=true;seg("leaveNow","leaveLater",false);$("whenWrap").hidden=false;
-  if(!$("when").value){const d=new Date(Date.now()+3600e3);d.setMinutes(0,0,0);$("when").value=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16)}save()};
+$("leaveLater").onclick=()=>setMode("leave");
 $("swap").onclick=()=>{const a=$("from").value;$("from").value=$("to").value;$("to").value=a;const p=picked.from;picked.from=picked.to;picked.to=p};
 $("go").onclick=compare;
 $("saveKey").onclick=()=>{state.key=$("apiKey").value.trim();save();$("saveKey").textContent="Saved";setTimeout(()=>$("saveKey").textContent="Save key",1500)};
@@ -770,7 +806,7 @@ PRICE_KEYS.forEach(k=>$(k).addEventListener("input",()=>{render();save()}));
 $("reset").onclick=()=>{PRICE_KEYS.forEach(k=>$(k).value=DEFAULTS[k]);render();save()};
 
 load();
-seg("rt","ow",state.round);seg("leaveNow","leaveLater",!state.later);$("whenWrap").hidden=!state.later;
+seg("rt","ow",state.round);setMode(tMode());
 window.__dor={render,setLast:x=>{last=x;render()}}; // test hook
 })();
 </script>
