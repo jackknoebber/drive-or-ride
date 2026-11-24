@@ -609,7 +609,7 @@ function render(){
   if(!last){return}
   const p=prices(),mult=state.round?2:1,anchor=last.base||Date.now();
   const mi=last.drive.meters/MI*mult;
-  const driveSec=(last.drive.sec+p.parkMin*60)*mult;
+  const driveSec=last.drive.sec+p.parkMin*60; // times are one way; costs follow the trip toggle
   const cars=[
     {k:"bolt",name:"Chevy Bolt EUV",sub:"home charging",c:"var(--bolt)"},
     {k:"ev",name:"RAV4 Prime",sub:mi>p.evRange?`${p.evRange} mi battery, ${(mi-p.evRange).toFixed(1)} mi gas`:"battery",c:"var(--ev)"},
@@ -629,21 +629,21 @@ function render(){
   let metro=null;
   if(last.transit){
     const t=last.transit,f=fareCost(t.fare,t.boardings,mult,p,t.legs);
-    metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} · ${f.src}${f.capped?", daily cap":""}`,c:"var(--metro)",cost:f.cost,sec:dur(tSch)*mult};
+    metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} · ${f.src}${f.capped?", daily cap":""}`,c:"var(--metro)",cost:f.cost,sec:dur(tSch)};
   }
   let combo=null;
   if(bt&&bt.loading)combo={name:"Bike + train",sub:"Checking stations…",c:"var(--bike)",cost:0,sec:null,pending:true};
   else if(best){const f=fareCost(best.fare,best.boardings,mult,p,best.legs);
-    combo={name:"Bike + train",sub:`${mixL} · ${(best.bikeMeters/MI).toFixed(1)} mi on the bike · ${f.src}${f.capped?", daily cap":""}`,c:"var(--bike)",cost:f.cost,sec:dur(bestSch)*mult};}
+    combo={name:"Bike + train",sub:`${mixL} · ${(best.bikeMeters/MI).toFixed(1)} mi bike each way · ${f.src}${f.capped?", daily cap":""}`,c:"var(--bike)",cost:f.cost,sec:dur(bestSch)};}
   let bike=null;
-  if(last.bike){const bmi=last.bike.meters/MI*mult;
-    bike={name:"Bike",sub:`${bmi.toFixed(1)} mi${p.bikeAdj!==100?` · ${p.bikeAdj}% of Google's time`:""}`,c:"var(--bike)",cost:0,sec:bikeSec*mult};}
+  if(last.bike){const bmi=last.bike.meters/MI;
+    bike={name:"Bike",sub:`${bmi.toFixed(1)} mi each way${p.bikeAdj!==100?` · ${p.bikeAdj}% of Google's time`:""}`,c:"var(--bike)",cost:0,sec:bikeSec};}
   const all=[...cars,...(metro?[metro]:[]),...(combo?[combo]:[]),...(bike?[bike]:[])];
   const ready=all.filter(a=>!a.pending);
   const maxC=Math.max(...ready.map(a=>a.cost),.01),minC=Math.min(...ready.filter(a=>a!==bike).map(a=>a.cost));
 
   $("tripMeta").textContent=`${mi.toFixed(1)} mi driven · ${state.round?"round trip":"one way"}`;
-  let h=`<div class="rows"><div class="row colhead"><div>Mode</div><div>Cost</div><div></div><div>Time</div></div>`;
+  let h=`<div class="rows"><div class="row colhead"><div>Mode</div><div>Cost${state.round?", round trip":""}</div><div></div><div>Time each way</div></div>`;
   h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${!a.pending&&a!==bike&&Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
     <div class="bar"><i style="width:${a.pending?0:a.cost/maxC*100}%;background:${a.c}"></i></div>
     <div class="cost">${a.pending?"…":a===bike?"Free":money(a.cost)}</div><div class="dur">${a.pending?"…":mins(a.sec)}</div></div>`).join("");
@@ -651,9 +651,9 @@ function render(){
 
   // one-line verdict
   if(metro){const bolt=cars[0],dc=bolt.cost-metro.cost,dt=metro.sec-bolt.sec;
-    let v=dc>0.005?`<b>Transit saves ${money(dc)}</b> over the Bolt${dt>60?` and takes ${mins(dt)} longer`:dt<-60?` and is ${mins(-dt)} faster`:""}.`
-      :dc<-0.005?`<b>The Bolt is ${money(-dc)} cheaper</b>${dt>60?` and ${mins(dt)} faster`:""} than transit.`:`<b>Same cost</b> in the Bolt or on transit.`;
-    if(dt>60&&dc>0)v+=` <span class="hint">That's about ${money(dc/(dt/3600))} an hour for the extra time.</span>`;
+    let v=dc>0.005?`<b>Transit saves ${money(dc)}</b> over the Bolt${dt>60?` and takes ${mins(dt)} longer each way`:dt<-60?` and is ${mins(-dt)} faster each way`:""}.`
+      :dc<-0.005?`<b>The Bolt is ${money(-dc)} cheaper</b>${dt>60?` and ${mins(dt)} faster each way`:""} than transit.`:`<b>Same cost</b> in the Bolt or on transit.`;
+    if(dt>60&&dc>0)v+=` <span class="hint">That's about ${money(dc/(dt*mult/3600))} an hour for the extra time.</span>`;
     h+=`<p class="lead verdict-line">${v}</p>`;
   }else h+=`<p class="lead verdict-line">Google found no transit route for this trip${state.later?" at that time":""}.</p>`;
 
@@ -684,7 +684,7 @@ function render(){
   h+=`<div class="foot"><div class="links"><a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving" target="_blank" rel="noopener">Driving in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=bicycling" target="_blank" rel="noopener">Bike in Google Maps</a></div>
-     <p class="hint">Drive time includes ${p.parkMin} min to park and walk.${state.round?" Round trip costs and times double the outbound route.":""}</p></div>`;
+     <p class="hint">Drive time includes ${p.parkMin} min to park and walk.${state.round?" Round trip cost doubles the outbound route. Times are one way.":""}</p></div>`;
   $("out").innerHTML=h;
   fitLabels();
 }
