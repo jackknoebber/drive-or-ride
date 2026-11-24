@@ -204,7 +204,7 @@ td.src{font-size:12px;color:var(--muted)}
       </div>
       <div class="opt" id="whenWrap" hidden>
         <label class="label" for="when">Departure time</label>
-        <input type="datetime-local" id="when">
+        <input type="datetime-local" id="when" step="300">
       </div>
       <div class="opt">
         <label class="label" for="parking">Parking ($)</label>
@@ -752,6 +752,9 @@ function seg(a,b,val){$(a).setAttribute("aria-pressed",String(val));$(b).setAttr
 $("rt").onclick=()=>{state.round=true;seg("rt","ow",true);render();save()};
 $("ow").onclick=()=>{state.round=false;seg("rt","ow",false);render();save()};
 $("leaveNow").onclick=()=>{state.later=false;seg("leaveNow","leaveLater",true);$("whenWrap").hidden=true;save()};
+// keep departure on 5-minute steps, even if a time is typed in
+$("when").addEventListener("change",()=>{const v=$("when").value;if(!v)return;const d=new Date(v);if(isNaN(d))return;
+  const m=Math.round(d.getMinutes()/5)*5;d.setMinutes(m,0,0);const nv=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);if(nv!==v)$("when").value=nv});
 $("leaveLater").onclick=()=>{state.later=true;seg("leaveNow","leaveLater",false);$("whenWrap").hidden=false;
   if(!$("when").value){const d=new Date(Date.now()+3600e3);d.setMinutes(0,0,0);$("when").value=new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16)}save()};
 $("swap").onclick=()=>{const a=$("from").value;$("from").value=$("to").value;$("to").value=a;const p=picked.from;picked.from=picked.to;picked.to=p};
