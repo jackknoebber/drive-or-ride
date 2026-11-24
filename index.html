@@ -92,7 +92,9 @@ input[type=number]{font-family:var(--f-mono);width:92px;padding:6px 8px}
 .leg.line{border:0;font-weight:600}
 .leg.bike{border-color:var(--bike);color:var(--bike);font-weight:600}
 .combo{display:flex;flex-direction:column;gap:8px;padding:12px 0 0;border-top:1px solid var(--line)}
-.combo .alts{font-size:13px;color:var(--muted);margin:0;padding-left:18px}
+.combo .seg{align-self:flex-start;max-width:100%}
+.combo .seg button{text-align:left;line-height:1.3;padding:8px 12px}
+.combo .seg button .num{font-size:12px;font-weight:400}
 .arrow{color:var(--muted)}
 .links{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:14px}
 .links a{color:var(--ink)}
@@ -195,6 +197,15 @@ td.src{font-size:12px;color:var(--muted)}
           <button type="button" class="btn" id="saveHome">Save</button>
         </div>
       </div>
+      <div class="opt">
+        <label class="label" for="favs">Favorite stations</label>
+        <div class="keybox">
+          <input type="text" id="favs" placeholder="Union Station Los Angeles, Irvine Station">
+          <button type="button" class="btn" id="saveFavs">Save</button>
+        </div>
+        <p class="hint">Comma separated. Bike + train always tries these when they're within bike range of either end.</p>
+      </div>
+      <label class="check"><input type="checkbox" id="railOnly" checked> <span>Bike + train: trains only, no buses</span></label>
       <label class="check"><input type="checkbox" id="wear"> <span>Count wear and tear on the cars (tires, brakes, service)</span></label>
       <div class="tbl">
       <table>
@@ -209,8 +220,8 @@ td.src{font-size:12px;color:var(--muted)}
           <tr><td>Metro fare</td><td><input type="number" id="fare" step="0.05" value="1.75"> $/ride</td><td class="src">Used when Google has no fare. Transfers within 2 hrs free.</td></tr>
           <tr><td>Metro daily cap</td><td><input type="number" id="dayCap" step="0.5" value="5"> $</td><td class="src">TAP fare capping</td></tr>
           <tr><td>Bike time</td><td><input type="number" id="bikeAdj" step="5" value="100"> %</td><td class="src">Of Google's estimate. Under 100 if you ride faster than Google assumes.</td></tr>
-          <tr><td>Bike to station, max</td><td><input type="number" id="bikeMax" step="0.5" value="4"> mi</td><td class="src">How far to look for stations at each end (straight line)</td></tr>
-          <tr><td>Stations to try</td><td><input type="number" id="stationCount" step="1" min="1" max="8" value="5"> per end</td><td class="src">Nearest rail stations checked at each end</td></tr>
+          <tr><td>Bike to station, max</td><td><input type="number" id="bikeMax" step="1" value="15"> mi</td><td class="src">Farthest you'd bike to or from a station (straight line)</td></tr>
+          <tr><td>Stations to try</td><td><input type="number" id="stationCount" step="1" min="1" max="8" value="7"> per end</td><td class="src">Nearest ones, some along the way, and your favorites</td></tr>
           <tr><td>Bike ↔ platform</td><td><input type="number" id="platformMin" step="1" value="3"> min</td><td class="src">Added each time you go between bike and train</td></tr>
           <tr><td>Wear and tear</td><td><input type="number" id="wearRate" step="0.01" value="0.10"> $/mi</td><td class="src">Only if checked above</td></tr>
         </tbody>
@@ -230,13 +241,13 @@ const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap",
 const DEFAULTS={};PRICE_KEYS.forEach(k=>DEFAULTS[k]=$(k).value);
 const LA={latitude:34.0,longitude:-118.42};
 
-let state={key:"",home:"",recent:[],round:true,later:false,wear:false};
+let state={key:"",home:"",recent:[],round:true,later:false,wear:false,railOnly:true,mix:"fast",favs:"Union Station Los Angeles",favCache:{}};
 let last=null; // last route results
 const picked={from:null,to:null}; // {text, placeId}
 
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE)||"{}");
   Object.assign(state,s.state||{});PRICE_KEYS.forEach(k=>{if(s.prices&&s.prices[k]!=null)$(k).value=s.prices[k]});}catch(e){}
-  $("apiKey").value=state.key||"";$("home").value=state.home||"";$("wear").checked=!!state.wear;
+  $("apiKey").value=state.key||"";$("home").value=state.home||"";$("wear").checked=!!state.wear;$("railOnly").checked=state.railOnly!==false;$("favs").value=state.favs||"";
   if(!state.key)$("settingsBox").open=true;}
 function save(){try{const prices={};PRICE_KEYS.forEach(k=>prices[k]=$(k).value);localStorage.setItem(STORE,JSON.stringify({state,prices}))}catch(e){}}
 
@@ -287,9 +298,10 @@ async function routeBike(o,d){
   const r=j.routes&&j.routes[0];if(!r)return null;
   return{meters:r.distanceMeters||0,sec:secs(r.duration)};
 }
-async function routeTransit(o,d,when){
+async function routeTransit(o,d,when,forBike){
   const body={origin:wp(o),destination:wp(d),travelMode:"TRANSIT",units:"IMPERIAL"};
   const t=when||depTime();if(t)body.departureTime=t;
+  if(forBike)transitPrefs(body);
   const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,
     "routes.distanceMeters,routes.duration,routes.travelAdvisory.transitFare,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails");
   const r=j.routes&&j.routes[0];if(!r)return null;
@@ -309,29 +321,58 @@ async function routeTransit(o,d,when){
   return{meters:r.distanceMeters||0,sec:secs(r.duration),legs:legs.filter(l=>l.type!=="walk"||l.sec>=60),fare,boardings:legs.filter(l=>l.type==="transit").length};
 }
 
-/* ---------- bike + transit ----------
+/* ---------- bike + train ----------
    Google won't plan a trip that mixes your own bike with transit, so this builds one:
-   1. find rail stations near each end (Places nearby search)
+   1. pick candidate rail stations at each end: the nearest few, a few along the way
+      toward the other end, and any favorite stations within bike range
    2. bike times to/from those stations (one route-matrix call per end)
-   3. transit times between every station pair (one route-matrix call)
-   4. take the fastest few combos and fetch full transit routes for them. */
-async function nearbyStations(center){
-  const p=prices();
+   3. train times between every station pair (one route-matrix call, trains only by default)
+   4. score each combo three ways (less biking / fastest / more biking), then fetch
+      full routes for the leaders of each. */
+const RAIL=["SUBWAY","TRAIN","LIGHT_RAIL","RAIL"];
+const MIXES=[{k:"less",label:"Less biking",w:2},{k:"fast",label:"Fastest",w:1},{k:"more",label:"More biking",w:0.5}];
+function transitPrefs(body){if(state.railOnly!==false)body.transitPreferences={allowedTravelModes:RAIL}}
+async function nearby(center,radius,count){
   const j=await gpost("https://places.googleapis.com/v1/places:searchNearby",{
-    includedTypes:["train_station","subway_station","light_rail_station"],maxResultCount:15,rankPreference:"DISTANCE",
-    locationRestriction:{circle:{center,radius:Math.min(50000,Math.max(400,p.bikeMax*MI))}}},
+    includedTypes:["train_station","subway_station","light_rail_station"],maxResultCount:Math.min(20,count),rankPreference:"DISTANCE",
+    locationRestriction:{circle:{center,radius:Math.min(50000,Math.max(400,radius))}}},
     "places.id,places.displayName,places.location");
+  return (j.places||[]).filter(pl=>pl.location&&pl.location.latitude!=null)
+    .map(pl=>({name:(pl.displayName&&pl.displayName.text)||"Station",placeId:pl.id,loc:{latitude:pl.location.latitude,longitude:pl.location.longitude}}));
+}
+async function favoriteStations(){
+  const names=(state.favs||"").split(",").map(s=>s.trim()).filter(Boolean);
+  state.favCache=state.favCache||{};
+  const out=await Promise.all(names.map(async n=>{
+    if(state.favCache[n])return state.favCache[n];
+    try{const j=await gpost("https://places.googleapis.com/v1/places:searchText",{textQuery:n,
+        locationBias:{circle:{center:LA,radius:50000}},maxResultCount:1},"places.id,places.displayName,places.location");
+      const pl=j.places&&j.places[0];if(!pl||!pl.location)return null;
+      const s={name:(pl.displayName&&pl.displayName.text)||n,placeId:pl.id,loc:{latitude:pl.location.latitude,longitude:pl.location.longitude},fav:true};
+      state.favCache[n]=s;return s}catch(e){return null}
+  }));
+  return out.filter(Boolean);
+}
+async function candidateStations(end,other,favs){
+  const p=prices(),R=p.bikeMax*MI,D=dist(end,other);
+  const reach=Math.min(R,D*0.85);
+  const toward=f=>{const t=Math.min(1,f*reach/Math.max(D,1));
+    return{latitude:end.latitude+(other.latitude-end.latitude)*t,longitude:end.longitude+(other.longitude-end.longitude)*t}};
+  const groups=await Promise.all([
+    nearby(end,Math.min(R,5*MI),8).then(a=>a.slice(0,4)),
+    reach>3*MI?nearby(toward(.4),1.5*MI,4).then(a=>a.slice(0,2)):[],
+    reach>6*MI?nearby(toward(.8),1.5*MI,4).then(a=>a.slice(0,2)):[],
+  ]);
   const out=[];
-  (j.places||[]).forEach(pl=>{const loc=pl.location;if(!loc||loc.latitude==null)return;
-    const ll={latitude:loc.latitude,longitude:loc.longitude};
-    if(out.some(s=>dist(s.loc,ll)<250))return; // Google often lists one station several times
-    out.push({name:(pl.displayName&&pl.displayName.text)||"Station",placeId:pl.id,loc:ll})});
+  const add=s=>{if(dist(end,s.loc)>R)return;if(out.some(o=>dist(o.loc,s.loc)<250))return;out.push(s)};
+  favs.forEach(add);groups.flat().forEach(add); // favorites first so they survive the cap
   return out.slice(0,p.stationCount);
 }
 async function matrix(origins,destinations,mode,dep){
   if(!origins.length||!destinations.length)return{};
   const body={origins:origins.map(o=>({waypoint:wp(o)})),destinations:destinations.map(d=>({waypoint:wp(d)})),travelMode:mode};
   if(dep)body.departureTime=dep;
+  if(mode==="TRANSIT")transitPrefs(body);
   const j=await gpost("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",body,"originIndex,destinationIndex,duration,distanceMeters,condition");
   const m={};
   (Array.isArray(j)?j:[]).forEach(e=>{if(e.condition&&e.condition!=="ROUTE_EXISTS")return;if(e.duration==null)return;
@@ -339,46 +380,50 @@ async function matrix(origins,destinations,mode,dep){
   return m;
 }
 async function routeBikeTransit(A,B){
-  const p=prices(),adj=p.bikeAdj/100,buf=p.platformMin*60;
-  const [oS,dS]=await Promise.all([nearbyStations(A),nearbyStations(B)]);
+  const p=prices(),adj=p.bikeAdj/100,buf=p.platformMin*60,maxM=p.bikeMax*MI*1.5;
+  const favs=await favoriteStations();
+  const [oS,dS]=await Promise.all([candidateStations(A,B,favs),candidateStations(B,A,favs)]);
   if(!oS.length&&!dS.length)return{none:`No rail stations within ${p.bikeMax} mi of either end.`};
   const Ap={loc:A},Bp={loc:B};
   const [b1,b2]=await Promise.all([matrix([Ap],oS,"BICYCLE"),matrix(dS,[Bp],"BICYCLE")]);
-  // transit can start from your door (walk) or from a station you biked to; same at the far end
+  // the train part can start at your door (walk) or at a station you biked to; same at the far end
   const tO=[{p:Ap,bike:null}],tD=[];
-  oS.forEach((s,i)=>{const b=b1["0,"+i];if(b)tO.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
-  dS.forEach((s,j)=>{const b=b2[j+",0"];if(b)tD.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
+  oS.forEach((s,i)=>{const b=b1["0,"+i];if(b&&b.meters<=maxM)tO.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
+  dS.forEach((s,j)=>{const b=b2[j+",0"];if(b&&b.meters<=maxM)tD.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
   tD.push({p:Bp,bike:null});
   if(tO.length===1&&tD.length===1)return{none:"Google found no bike route to any nearby station."};
   const base=depTime()?new Date(depTime()).getTime():Date.now();
   const firstBikes=tO.filter(o=>o.bike).map(o=>o.bike.sec).sort((a,b)=>a-b);
   const typical=firstBikes.length?firstBikes[Math.floor(firstBikes.length/2)]+buf:0;
   const tm=await matrix(tO.map(o=>o.p),tD.map(d=>d.p),"TRANSIT",new Date(base+typical*1000+60e3).toISOString());
-  let cands=[];
+  const cands=[];
   tO.forEach((o,i)=>tD.forEach((d,j)=>{
     if(!o.bike&&!d.bike)return; // that's plain transit, already its own row
     if(dist(o.p.loc,d.p.loc)<400)return;
     const t=tm[i+","+j];if(!t)return;
     const bikeSec=(o.bike?o.bike.sec+buf:0)+(d.bike?d.bike.sec+buf:0);
-    cands.push({o,d,sec:bikeSec+t.sec,bikeSec});
+    cands.push({key:i+","+j,o,d,bikeSec,transitSec:t.sec});
   }));
-  if(!cands.length)return{none:"Google found no transit between the stations near each end."};
-  cands.sort((a,b)=>a.sec-b.sec);
-  // full routes for the best few, departing when you'd actually reach the first station
-  const top=cands.slice(0,4);
+  if(!cands.length)return{none:"Google found no train trip between the stations near each end."};
+  const score=(c,w)=>c.transitSec+w*c.bikeSec;
+  // full routes for the top 3 of each mix (shared), departing when you'd reach the first station
+  const pick=new Map();
+  MIXES.forEach(m=>[...cands].sort((a,b)=>score(a,m.w)-score(b,m.w)).slice(0,3).forEach(c=>pick.set(c.key,c)));
+  const top=[...pick.values()];
   const full=await Promise.all(top.map(c=>{const lead=c.o.bike?c.o.bike.sec+buf:0;
-    return routeTransit(c.o.p,c.d.p,new Date(base+lead*1000+60e3).toISOString()).catch(()=>null)}));
-  let opts=top.map((c,i)=>{const t=full[i];if(!t||!t.boardings)return null; // skip "transit" routes that are only walking
+    return routeTransit(c.o.p,c.d.p,new Date(base+lead*1000+60e3).toISOString(),true).catch(()=>null)}));
+  const opts=top.map((c,i)=>{const t=full[i];if(!t||!t.boardings)return null; // skip "transit" that is only walking
     const legs=[];
     if(c.o.bike)legs.push({type:"bike",sec:c.o.bike.sec,meters:c.o.bike.meters,to:c.o.p.name});
     legs.push(...t.legs);
     if(c.d.bike)legs.push({type:"bike",sec:c.d.bike.sec,meters:c.d.bike.meters,from:c.d.p.name});
-    return{sec:c.bikeSec+t.sec,fare:t.fare,boardings:t.boardings,legs,startSt:c.o.bike?c.o.p:null,endSt:c.d.bike?c.d.p:null,
-      bikeMeters:(c.o.bike?c.o.bike.meters:0)+(c.d.bike?c.d.bike.meters:0),transitSec:t.sec};
+    return{key:c.key,sec:c.bikeSec+t.sec,bikeSec:c.bikeSec,transitSec:t.sec,fare:t.fare,boardings:t.boardings,legs,
+      startSt:c.o.bike?c.o.p:null,endSt:c.d.bike?c.d.p:null,bikeMeters:(c.o.bike?c.o.bike.meters:0)+(c.d.bike?c.d.bike.meters:0)};
   }).filter(Boolean);
   if(!opts.length)return{none:"None of the station combinations beat walking to transit."};
-  opts.sort((a,b)=>a.sec-b.sec);
-  return{best:opts[0],alts:opts.slice(1,3)};
+  const mixes={};
+  MIXES.forEach(m=>{mixes[m.k]=[...opts].sort((a,b)=>score(a,m.w)-score(b,m.w))[0]});
+  return{mixes};
 }
 function comboLabel(c){
   const lines=c.legs.filter(l=>l.type==="transit").map(l=>l.name);
@@ -392,10 +437,12 @@ function comboLabel(c){
 /* ---------- cost model ---------- */
 function prices(){return{gas:v("gas"),kwh:v("kwh"),boltEff:v("boltEff")||1,evEff:v("evEff")||1,evRange:v("evRange"),mpg:v("mpg")||1,
   fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin"),bikeAdj:v("bikeAdj")||100,
-  bikeMax:v("bikeMax")||4,stationCount:Math.min(8,Math.max(1,Math.round(v("stationCount"))||5)),platformMin:v("platformMin")}}
-function fareCost(oneWayFare,boardings,mult,p){
+  bikeMax:v("bikeMax")||15,stationCount:Math.min(8,Math.max(1,Math.round(v("stationCount"))||7)),platformMin:v("platformMin")}}
+// Metro's daily cap doesn't cover Metrolink or Amtrak tickets
+const capOk=legs=>!(legs||[]).some(l=>l.type==="transit"&&/metrolink|amtrak/i.test(l.agency||""));
+function fareCost(oneWayFare,boardings,mult,p,legs){
   const oneWay=oneWayFare!=null?oneWayFare:(boardings?p.fare:0);
-  const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
+  const cost=capOk(legs)?Math.min(oneWay*mult,p.dayCap||Infinity):oneWay*mult;
   return{cost,src:oneWayFare!=null?"Google fare":"est. fare",capped:cost<oneWay*mult};
 }
 function carCost(mode,mi,p){
@@ -418,15 +465,15 @@ function render(){
   ].map(c=>({...c,cost:carCost(c.k,mi,p),sec:driveSec}));
   let metro=null;
   if(last.transit){
-    const t=last.transit;let oneWay,src;
-    if(t.fare!=null){oneWay=t.fare;src="Google fare"}else{oneWay=t.boardings?p.fare:0;src="est. fare"}
-    const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
-    metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} each way · ${src}${cost<oneWay*mult?", daily cap":""}`,c:"var(--metro)",cost,sec:t.sec*mult};
+    const t=last.transit,f=fareCost(t.fare,t.boardings,mult,p,t.legs);
+    metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} each way · ${f.src}${f.capped?", daily cap":""}`,c:"var(--metro)",cost:f.cost,sec:t.sec*mult};
   }
   let combo=null;const bt=last.bt;
-  if(bt&&bt.loading)combo={name:"Bike + transit",sub:"Checking stations near each end…",c:"var(--bike)",cost:0,sec:null,pending:true};
-  else if(bt&&bt.best){const b=bt.best,f=fareCost(b.fare,b.boardings,mult,p);
-    combo={name:"Bike + transit",sub:`${comboLabel(b)} · ${f.src}${f.capped?", daily cap":""}`,c:"var(--bike)",cost:f.cost,sec:b.sec*mult};}
+  const mixK=MIXES.some(m=>m.k===state.mix)?state.mix:"fast",mixL=MIXES.find(m=>m.k===mixK).label;
+  const best=bt&&bt.mixes?bt.mixes[mixK]:null;
+  if(bt&&bt.loading)combo={name:"Bike + train",sub:"Checking stations near each end…",c:"var(--bike)",cost:0,sec:null,pending:true};
+  else if(best){const f=fareCost(best.fare,best.boardings,mult,p,best.legs);
+    combo={name:"Bike + train",sub:`${mixL} · ${comboLabel(best)} · ${f.src}${f.capped?", daily cap":""}`,c:"var(--bike)",cost:f.cost,sec:best.sec*mult};}
   let bike=null;
   if(last.bike){const bmi=last.bike.meters/1609.344*mult;
     bike={name:"Bike",sub:`${bmi.toFixed(1)} mi${p.bikeAdj!==100?` · ${p.bikeAdj}% of Google's time`:""}`,c:"var(--bike)",cost:0,sec:last.bike.sec*mult*(p.bikeAdj||100)/100};}
@@ -462,8 +509,10 @@ function render(){
   }
   const q=s=>encodeURIComponent(s);
   const o=q(last.from.text),d=q(last.to.text);
-  if(bt&&bt.best){const b=bt.best;
-    h+=`<div class="combo"><p><b>Bike + transit</b>, ${mins(b.sec)} one way`;
+  if(best){const b=best;
+    h+=`<div class="combo"><div class="seg" role="group" aria-label="Bike and train mix">${MIXES.map(m=>{const o=bt.mixes[m.k];
+      return `<button type="button" data-mix="${m.k}" aria-pressed="${m.k===mixK}">${m.label}<br><span class="num">${mins(o.sec)} · ${(o.bikeMeters/MI).toFixed(1)} mi</span></button>`}).join("")}</div>`;
+    h+=`<p><b>Bike + train</b>, ${mins(b.sec)} one way`;
     if(metro){const dt=last.transit.sec-b.sec;h+=dt>60?`, ${mins(dt)} faster than transit alone`:dt<-60?`, ${mins(-dt)} slower than transit alone`:", about the same as transit alone"}
     h+=`. ${(b.bikeMeters/MI).toFixed(1)} mi on the bike.</p>`;
     h+=`<div class="legs" aria-label="Bike and transit route">${legHtml(b.legs)}</div>`;
@@ -475,9 +524,8 @@ function render(){
     h+=`<a href="${g(b.startSt?q(ll(b.startSt)):o,lastStop,"transit",b.endSt&&b.endSt.placeId)}" target="_blank" rel="noopener">Transit leg</a>`;
     if(b.endSt)h+=`<a href="${g(q(ll(b.endSt)),d,"bicycling")}" target="_blank" rel="noopener">Bike from ${esc(b.endSt.name)}</a>`;
     h+=`</div>`;
-    if(bt.alts.length)h+=`<p class="hint">Other options:</p><ul class="alts">${bt.alts.map(a=>`<li>${mins(a.sec)} · ${esc(comboLabel(a))}</li>`).join("")}</ul>`;
     h+=`<p class="hint">Bike times include ${p.platformMin} min each time you switch between bike and train.</p></div>`;
-  }else if(bt&&bt.none){h+=`<p class="hint">Bike + transit: ${esc(bt.none)}</p>`}
+  }else if(bt&&bt.none){h+=`<p class="hint">Bike + train: ${esc(bt.none)}</p>`}
   h+=`<div class="links"><a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving" target="_blank" rel="noopener">Driving in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=bicycling" target="_blank" rel="noopener">Bike in Google Maps</a></div>`;
@@ -560,6 +608,9 @@ $("swap").onclick=()=>{const a=$("from").value;$("from").value=$("to").value;$("
 $("go").onclick=compare;
 $("saveKey").onclick=()=>{state.key=$("apiKey").value.trim();save();$("saveKey").textContent="Saved";setTimeout(()=>$("saveKey").textContent="Save key",1500)};
 $("saveHome").onclick=()=>{state.home=$("home").value.trim();save();$("saveHome").textContent="Saved";setTimeout(()=>$("saveHome").textContent="Save",1500)};
+$("railOnly").onchange=()=>{state.railOnly=$("railOnly").checked;save()};
+$("saveFavs").onclick=()=>{state.favs=$("favs").value.trim();save();$("saveFavs").textContent="Saved";setTimeout(()=>$("saveFavs").textContent="Save",1500)};
+$("out").addEventListener("click",e=>{const b=e.target.closest("[data-mix]");if(b){state.mix=b.dataset.mix;render();save()}});
 $("wear").onchange=()=>{state.wear=$("wear").checked;render();save()};
 PRICE_KEYS.forEach(k=>$(k).addEventListener("input",()=>{render();save()}));
 $("reset").onclick=()=>{PRICE_KEYS.forEach(k=>$(k).value=DEFAULTS[k]);render();save()};
