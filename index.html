@@ -90,6 +90,9 @@ input[type=number]{font-family:var(--f-mono);width:92px;padding:6px 8px}
 .legs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px}
 .leg{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:3px;border:1px solid var(--line)}
 .leg.line{border:0;font-weight:600}
+.leg.bike{border-color:var(--bike);color:var(--bike);font-weight:600}
+.combo{display:flex;flex-direction:column;gap:8px;padding:12px 0 0;border-top:1px solid var(--line)}
+.combo .alts{font-size:13px;color:var(--muted);margin:0;padding-left:18px}
 .arrow{color:var(--muted)}
 .links{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:14px}
 .links a{color:var(--ink)}
@@ -115,7 +118,7 @@ td.src{font-size:12px;color:var(--muted)}
 <div class="wrap">
   <header>
     <h1>Drive or Ride</h1>
-    <p class="hint" style="max-width:44ch">Cost and travel time for the Bolt, the RAV4 Prime on battery or gas, LA Metro, and your bike.</p>
+    <p class="hint" style="max-width:44ch">Cost and travel time for the Bolt, the RAV4 Prime on battery or gas, LA Metro, your bike, and bike + train.</p>
   </header>
 
   <section class="panel" aria-label="Trip">
@@ -206,6 +209,9 @@ td.src{font-size:12px;color:var(--muted)}
           <tr><td>Metro fare</td><td><input type="number" id="fare" step="0.05" value="1.75"> $/ride</td><td class="src">Used when Google has no fare. Transfers within 2 hrs free.</td></tr>
           <tr><td>Metro daily cap</td><td><input type="number" id="dayCap" step="0.5" value="5"> $</td><td class="src">TAP fare capping</td></tr>
           <tr><td>Bike time</td><td><input type="number" id="bikeAdj" step="5" value="100"> %</td><td class="src">Of Google's estimate. Under 100 if you ride faster than Google assumes.</td></tr>
+          <tr><td>Bike to station, max</td><td><input type="number" id="bikeMax" step="0.5" value="4"> mi</td><td class="src">How far to look for stations at each end (straight line)</td></tr>
+          <tr><td>Stations to try</td><td><input type="number" id="stationCount" step="1" min="1" max="8" value="5"> per end</td><td class="src">Nearest rail stations checked at each end</td></tr>
+          <tr><td>Bike ↔ platform</td><td><input type="number" id="platformMin" step="1" value="3"> min</td><td class="src">Added each time you go between bike and train</td></tr>
           <tr><td>Wear and tear</td><td><input type="number" id="wearRate" step="0.01" value="0.10"> $/mi</td><td class="src">Only if checked above</td></tr>
         </tbody>
       </table>
@@ -220,7 +226,7 @@ td.src{font-size:12px;color:var(--muted)}
 "use strict";
 const $=id=>document.getElementById(id);
 const STORE="drive-or-ride-app";
-const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap","wearRate","parking","parkMin","bikeAdj"];
+const PRICE_KEYS=["gas","kwh","boltEff","evEff","evRange","mpg","fare","dayCap","wearRate","parking","parkMin","bikeAdj","bikeMax","stationCount","platformMin"];
 const DEFAULTS={};PRICE_KEYS.forEach(k=>DEFAULTS[k]=$(k).value);
 const LA={latitude:34.0,longitude:-118.42};
 
@@ -257,7 +263,11 @@ async function autocomplete(input){
     return{placeId:p.placeId,text:p.text&&p.text.text||"",main:p.structuredFormat&&p.structuredFormat.mainText&&p.structuredFormat.mainText.text||p.text.text,
       sec:p.structuredFormat&&p.structuredFormat.secondaryText&&p.structuredFormat.secondaryText.text||""}});
 }
-function wp(p){return p.placeId?{placeId:p.placeId}:{address:p.text}}
+function wp(p){return p.loc?{location:{latLng:p.loc}}:p.placeId?{placeId:p.placeId}:{address:p.text}}
+const MI=1609.344;
+function dist(a,b){const R=6371e3,r=x=>x*Math.PI/180,dLa=r(b.latitude-a.latitude),dLo=r(b.longitude-a.longitude);
+  const h=Math.sin(dLa/2)**2+Math.cos(r(a.latitude))*Math.cos(r(b.latitude))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+const llOf=x=>x&&x.latLng&&x.latLng.latitude!=null?{latitude:x.latLng.latitude,longitude:x.latLng.longitude}:null;
 function depTime(){
   if(!state.later||!$("when").value)return null;
   const d=new Date($("when").value);return isNaN(d)||d<new Date()?null:d.toISOString();
@@ -265,9 +275,11 @@ function depTime(){
 async function routeDrive(o,d){
   const body={origin:wp(o),destination:wp(d),travelMode:"DRIVE",routingPreference:"TRAFFIC_AWARE",units:"IMPERIAL"};
   const t=depTime();if(t)body.departureTime=t;
-  const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,"routes.distanceMeters,routes.duration,routes.staticDuration");
+  const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,"routes.distanceMeters,routes.duration,routes.staticDuration,routes.legs.startLocation,routes.legs.endLocation");
   const r=j.routes&&j.routes[0];if(!r)throw new Error("Google couldn't find a driving route between those places.");
-  return{meters:r.distanceMeters||0,sec:secs(r.duration),staticSec:secs(r.staticDuration)};
+  const lg=r.legs||[];
+  return{meters:r.distanceMeters||0,sec:secs(r.duration),staticSec:secs(r.staticDuration),
+    start:lg.length?llOf(lg[0].startLocation):null,end:lg.length?llOf(lg[lg.length-1].endLocation):null};
 }
 async function routeBike(o,d){
   const body={origin:wp(o),destination:wp(d),travelMode:"BICYCLE",units:"IMPERIAL"};
@@ -275,9 +287,9 @@ async function routeBike(o,d){
   const r=j.routes&&j.routes[0];if(!r)return null;
   return{meters:r.distanceMeters||0,sec:secs(r.duration)};
 }
-async function routeTransit(o,d){
+async function routeTransit(o,d,when){
   const body={origin:wp(o),destination:wp(d),travelMode:"TRANSIT",units:"IMPERIAL"};
-  const t=depTime();if(t)body.departureTime=t;
+  const t=when||depTime();if(t)body.departureTime=t;
   const j=await gpost("https://routes.googleapis.com/directions/v2:computeRoutes",body,
     "routes.distanceMeters,routes.duration,routes.travelAdvisory.transitFare,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails");
   const r=j.routes&&j.routes[0];if(!r)return null;
@@ -297,9 +309,95 @@ async function routeTransit(o,d){
   return{meters:r.distanceMeters||0,sec:secs(r.duration),legs:legs.filter(l=>l.type!=="walk"||l.sec>=60),fare,boardings:legs.filter(l=>l.type==="transit").length};
 }
 
+/* ---------- bike + transit ----------
+   Google won't plan a trip that mixes your own bike with transit, so this builds one:
+   1. find rail stations near each end (Places nearby search)
+   2. bike times to/from those stations (one route-matrix call per end)
+   3. transit times between every station pair (one route-matrix call)
+   4. take the fastest few combos and fetch full transit routes for them. */
+async function nearbyStations(center){
+  const p=prices();
+  const j=await gpost("https://places.googleapis.com/v1/places:searchNearby",{
+    includedTypes:["train_station","subway_station","light_rail_station"],maxResultCount:15,rankPreference:"DISTANCE",
+    locationRestriction:{circle:{center,radius:Math.min(50000,Math.max(400,p.bikeMax*MI))}}},
+    "places.id,places.displayName,places.location");
+  const out=[];
+  (j.places||[]).forEach(pl=>{const loc=pl.location;if(!loc||loc.latitude==null)return;
+    const ll={latitude:loc.latitude,longitude:loc.longitude};
+    if(out.some(s=>dist(s.loc,ll)<250))return; // Google often lists one station several times
+    out.push({name:(pl.displayName&&pl.displayName.text)||"Station",placeId:pl.id,loc:ll})});
+  return out.slice(0,p.stationCount);
+}
+async function matrix(origins,destinations,mode,dep){
+  if(!origins.length||!destinations.length)return{};
+  const body={origins:origins.map(o=>({waypoint:wp(o)})),destinations:destinations.map(d=>({waypoint:wp(d)})),travelMode:mode};
+  if(dep)body.departureTime=dep;
+  const j=await gpost("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",body,"originIndex,destinationIndex,duration,distanceMeters,condition");
+  const m={};
+  (Array.isArray(j)?j:[]).forEach(e=>{if(e.condition&&e.condition!=="ROUTE_EXISTS")return;if(e.duration==null)return;
+    m[(e.originIndex||0)+","+(e.destinationIndex||0)]={sec:secs(e.duration),meters:e.distanceMeters||0}});
+  return m;
+}
+async function routeBikeTransit(A,B){
+  const p=prices(),adj=p.bikeAdj/100,buf=p.platformMin*60;
+  const [oS,dS]=await Promise.all([nearbyStations(A),nearbyStations(B)]);
+  if(!oS.length&&!dS.length)return{none:`No rail stations within ${p.bikeMax} mi of either end.`};
+  const Ap={loc:A},Bp={loc:B};
+  const [b1,b2]=await Promise.all([matrix([Ap],oS,"BICYCLE"),matrix(dS,[Bp],"BICYCLE")]);
+  // transit can start from your door (walk) or from a station you biked to; same at the far end
+  const tO=[{p:Ap,bike:null}],tD=[];
+  oS.forEach((s,i)=>{const b=b1["0,"+i];if(b)tO.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
+  dS.forEach((s,j)=>{const b=b2[j+",0"];if(b)tD.push({p:s,bike:{sec:b.sec*adj,meters:b.meters}})});
+  tD.push({p:Bp,bike:null});
+  if(tO.length===1&&tD.length===1)return{none:"Google found no bike route to any nearby station."};
+  const base=depTime()?new Date(depTime()).getTime():Date.now();
+  const firstBikes=tO.filter(o=>o.bike).map(o=>o.bike.sec).sort((a,b)=>a-b);
+  const typical=firstBikes.length?firstBikes[Math.floor(firstBikes.length/2)]+buf:0;
+  const tm=await matrix(tO.map(o=>o.p),tD.map(d=>d.p),"TRANSIT",new Date(base+typical*1000+60e3).toISOString());
+  let cands=[];
+  tO.forEach((o,i)=>tD.forEach((d,j)=>{
+    if(!o.bike&&!d.bike)return; // that's plain transit, already its own row
+    if(dist(o.p.loc,d.p.loc)<400)return;
+    const t=tm[i+","+j];if(!t)return;
+    const bikeSec=(o.bike?o.bike.sec+buf:0)+(d.bike?d.bike.sec+buf:0);
+    cands.push({o,d,sec:bikeSec+t.sec,bikeSec});
+  }));
+  if(!cands.length)return{none:"Google found no transit between the stations near each end."};
+  cands.sort((a,b)=>a.sec-b.sec);
+  // full routes for the best few, departing when you'd actually reach the first station
+  const top=cands.slice(0,4);
+  const full=await Promise.all(top.map(c=>{const lead=c.o.bike?c.o.bike.sec+buf:0;
+    return routeTransit(c.o.p,c.d.p,new Date(base+lead*1000+60e3).toISOString()).catch(()=>null)}));
+  let opts=top.map((c,i)=>{const t=full[i];if(!t||!t.boardings)return null; // skip "transit" routes that are only walking
+    const legs=[];
+    if(c.o.bike)legs.push({type:"bike",sec:c.o.bike.sec,meters:c.o.bike.meters,to:c.o.p.name});
+    legs.push(...t.legs);
+    if(c.d.bike)legs.push({type:"bike",sec:c.d.bike.sec,meters:c.d.bike.meters,from:c.d.p.name});
+    return{sec:c.bikeSec+t.sec,fare:t.fare,boardings:t.boardings,legs,startSt:c.o.bike?c.o.p:null,endSt:c.d.bike?c.d.p:null,
+      bikeMeters:(c.o.bike?c.o.bike.meters:0)+(c.d.bike?c.d.bike.meters:0),transitSec:t.sec};
+  }).filter(Boolean);
+  if(!opts.length)return{none:"None of the station combinations beat walking to transit."};
+  opts.sort((a,b)=>a.sec-b.sec);
+  return{best:opts[0],alts:opts.slice(1,3)};
+}
+function comboLabel(c){
+  const lines=c.legs.filter(l=>l.type==="transit").map(l=>l.name);
+  const parts=[];
+  if(c.startSt)parts.push("bike to "+c.startSt.name);
+  parts.push(lines.join(" + "));
+  if(c.endSt)parts.push("bike from "+c.endSt.name);
+  return parts.join(" · ");
+}
+
 /* ---------- cost model ---------- */
 function prices(){return{gas:v("gas"),kwh:v("kwh"),boltEff:v("boltEff")||1,evEff:v("evEff")||1,evRange:v("evRange"),mpg:v("mpg")||1,
-  fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin"),bikeAdj:v("bikeAdj")||100}}
+  fare:v("fare"),dayCap:v("dayCap"),wear:state.wear?v("wearRate"):0,parking:v("parking"),parkMin:v("parkMin"),bikeAdj:v("bikeAdj")||100,
+  bikeMax:v("bikeMax")||4,stationCount:Math.min(8,Math.max(1,Math.round(v("stationCount"))||5)),platformMin:v("platformMin")}}
+function fareCost(oneWayFare,boardings,mult,p){
+  const oneWay=oneWayFare!=null?oneWayFare:(boardings?p.fare:0);
+  const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
+  return{cost,src:oneWayFare!=null?"Google fare":"est. fare",capped:cost<oneWay*mult};
+}
 function carCost(mode,mi,p){
   let e;
   if(mode==="bolt")e=mi/p.boltEff*p.kwh;
@@ -325,18 +423,23 @@ function render(){
     const cost=Math.min(oneWay*mult,p.dayCap||Infinity);
     metro={name:"Transit",sub:`${t.boardings} line${t.boardings===1?"":"s"} each way · ${src}${cost<oneWay*mult?", daily cap":""}`,c:"var(--metro)",cost,sec:t.sec*mult};
   }
+  let combo=null;const bt=last.bt;
+  if(bt&&bt.loading)combo={name:"Bike + transit",sub:"Checking stations near each end…",c:"var(--bike)",cost:0,sec:null,pending:true};
+  else if(bt&&bt.best){const b=bt.best,f=fareCost(b.fare,b.boardings,mult,p);
+    combo={name:"Bike + transit",sub:`${comboLabel(b)} · ${f.src}${f.capped?", daily cap":""}`,c:"var(--bike)",cost:f.cost,sec:b.sec*mult};}
   let bike=null;
   if(last.bike){const bmi=last.bike.meters/1609.344*mult;
     bike={name:"Bike",sub:`${bmi.toFixed(1)} mi${p.bikeAdj!==100?` · ${p.bikeAdj}% of Google's time`:""}`,c:"var(--bike)",cost:0,sec:last.bike.sec*mult*(p.bikeAdj||100)/100};}
-  const all=[...cars,...(metro?[metro]:[]),...(bike?[bike]:[])];
-  const maxC=Math.max(...all.map(a=>a.cost),.01),minC=Math.min(...all.filter(a=>a!==bike).map(a=>a.cost));
+  const all=[...cars,...(metro?[metro]:[]),...(combo?[combo]:[]),...(bike?[bike]:[])];
+  const ready=all.filter(a=>!a.pending);
+  const maxC=Math.max(...ready.map(a=>a.cost),.01),minC=Math.min(...ready.filter(a=>a!==bike).map(a=>a.cost));
   const fastest=Math.min(...all.map(a=>a.sec));
 
   $("tripMeta").textContent=`${mi.toFixed(1)} mi driven · ${state.round?"round trip":"one way"}`;
   let h=`<div class="rows"><div class="row colhead"><div>Mode</div><div>Cost</div><div></div><div>Time</div></div>`;
-  h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${a!==bike&&Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
-    <div class="bar"><i style="width:${a.cost/maxC*100}%;background:${a.c}"></i></div>
-    <div class="cost">${a===bike?"Free":money(a.cost)}</div><div class="dur">${mins(a.sec)}</div></div>`).join("");
+  h+=all.map(a=>`<div class="row"><div class="who"><b>${a.name}${!a.pending&&a!==bike&&Math.abs(a.cost-minC)<.005?'<span class="tag">Cheapest</span>':''}</b><span>${esc(a.sub)}</span></div>
+    <div class="bar"><i style="width:${a.pending?0:a.cost/maxC*100}%;background:${a.c}"></i></div>
+    <div class="cost">${a.pending?"…":a===bike?"Free":money(a.cost)}</div><div class="dur">${a.pending?"…":mins(a.sec)}</div></div>`).join("");
   h+=`</div>`;
 
   // verdict
@@ -359,6 +462,22 @@ function render(){
   }
   const q=s=>encodeURIComponent(s);
   const o=q(last.from.text),d=q(last.to.text);
+  if(bt&&bt.best){const b=bt.best;
+    h+=`<div class="combo"><p><b>Bike + transit</b>, ${mins(b.sec)} one way`;
+    if(metro){const dt=last.transit.sec-b.sec;h+=dt>60?`, ${mins(dt)} faster than transit alone`:dt<-60?`, ${mins(-dt)} slower than transit alone`:", about the same as transit alone"}
+    h+=`. ${(b.bikeMeters/MI).toFixed(1)} mi on the bike.</p>`;
+    h+=`<div class="legs" aria-label="Bike and transit route">${legHtml(b.legs)}</div>`;
+    const ll=x=>`${x.loc.latitude},${x.loc.longitude}`;
+    const g=(a,bb,mode,destPid)=>`https://www.google.com/maps/dir/?api=1&origin=${a}&destination=${bb}${destPid?"&destination_place_id="+q(destPid):""}&travelmode=${mode}`;
+    const lastStop=b.endSt?q(b.endSt.name):d;
+    h+=`<div class="links">`;
+    if(b.startSt)h+=`<a href="${g(o,q(b.startSt.name),"bicycling",b.startSt.placeId)}" target="_blank" rel="noopener">Bike to ${esc(b.startSt.name)}</a>`;
+    h+=`<a href="${g(b.startSt?q(ll(b.startSt)):o,lastStop,"transit",b.endSt&&b.endSt.placeId)}" target="_blank" rel="noopener">Transit leg</a>`;
+    if(b.endSt)h+=`<a href="${g(q(ll(b.endSt)),d,"bicycling")}" target="_blank" rel="noopener">Bike from ${esc(b.endSt.name)}</a>`;
+    h+=`</div>`;
+    if(bt.alts.length)h+=`<p class="hint">Other options:</p><ul class="alts">${bt.alts.map(a=>`<li>${mins(a.sec)} · ${esc(comboLabel(a))}</li>`).join("")}</ul>`;
+    h+=`<p class="hint">Bike times include ${p.platformMin} min each time you switch between bike and train.</p></div>`;
+  }else if(bt&&bt.none){h+=`<p class="hint">Bike + transit: ${esc(bt.none)}</p>`}
   h+=`<div class="links"><a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=driving" target="_blank" rel="noopener">Driving in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=transit" target="_blank" rel="noopener">Transit in Google Maps</a>
      <a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}&travelmode=bicycling" target="_blank" rel="noopener">Bike in Google Maps</a></div>`;
@@ -369,6 +488,7 @@ function render(){
 function legHtml(legs){
   return legs.map(l=>{
     if(l.type==="walk")return `<span class="leg">Walk ${Math.round(l.sec/60)} min</span>`;
+    if(l.type==="bike")return `<span class="leg bike">Bike ${Math.round(l.sec/60)} min</span><span class="hint">${(l.meters/MI).toFixed(1)} mi${l.to?" to "+esc(l.to):l.from?" from "+esc(l.from):""}</span>`;
     const st=l.color?`background:${esc(l.color)};color:${esc(l.text||"#fff")}`:`background:var(--metro);color:var(--on-win)`;
     return `<span class="leg line" style="${st}" title="${esc(l.agency+" · "+l.from+" → "+l.to)}">${esc(l.name)}</span><span class="hint">${Math.round(l.sec/60)} min${l.stops?" · "+l.stops+" stops":""}</span>`;
   }).join('<span class="arrow">→</span>');
@@ -383,9 +503,15 @@ async function compare(){
   const go=$("go");go.disabled=true;go.textContent="Comparing…";
   try{
     const [drive,transit,bike]=await Promise.all([routeDrive(from,to),routeTransit(from,to).catch(()=>null),routeBike(from,to).catch(()=>null)]);
-    last={from,to,drive,transit,bike};
+    const run={from,to,drive,transit,bike,bt:null};last=run;
     remember(from);remember(to);
     sessionToken=newToken();
+    if(drive.start&&drive.end){
+      run.bt={loading:true};
+      routeBikeTransit(drive.start,drive.end)
+        .then(r=>{run.bt=r},e=>{run.bt={none:e.message}})
+        .finally(()=>{if(last===run)render()});
+    }
     render();
   }catch(e){err.textContent=e.message;err.hidden=false}
   finally{go.disabled=false;go.textContent="Compare";save()}

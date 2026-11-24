@@ -1,6 +1,6 @@
 # Drive or Ride
 
-One-page web app. Type a start and destination, and it compares cost and travel time for the Chevy Bolt EUV, the RAV4 Prime on battery, the RAV4 Prime on gas, and transit. Routes and times come from Google's Routes API, and address suggestions come from Places API (New).
+One-page web app. Type a start and destination, and it compares cost and travel time for the Chevy Bolt EUV, the RAV4 Prime on battery, the RAV4 Prime on gas, transit, your bike, and bike + transit. Routes and times come from Google's Routes API, and address suggestions come from Places API (New).
 
 There's no server and no build step. It's just `index.html`. Your API key goes in the app's Settings panel and is saved in your browser, so it's never in the code.
 
@@ -34,4 +34,5 @@ Open the site, expand **Settings**, paste the key, and press **Save key**. Add y
 - **Car cost** is distance times energy cost, using the prices and efficiency numbers in Settings, plus parking. Wear and tear is added only if you turn it on.
 - **RAV4 battery** uses the battery for the first 42 miles (editable), and the miles after that are charged at the gas rate.
 - **Transit fare** uses Google's fare when Google returns one. Otherwise it's $1.75 per direction, since Metro transfers are free for 2 hours. The total is capped at the $5 Metro daily cap.
+- **Bike + transit** is built by the app, because Google won't plan a trip that mixes your own bike with transit. It finds the nearest rail stations at each end (5 by default, within 4 miles), gets bike times to and from them and transit times between every pair, then fetches full routes for the fastest few. It also checks biking at only one end and walking at the other. Each switch between bike and train adds the "Bike ↔ platform" minutes. The fare uses the same rules as transit. One Compare makes roughly 10 extra API calls (2 nearby searches, 3 route-matrix calls, up to 4 transit routes). That's still well inside the free allowance for personal use, and it uses the Routes and Places APIs you already enabled.
 - **Round trip** doubles the outbound route.
